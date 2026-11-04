@@ -104,7 +104,18 @@ public class MainActivity extends AppCompatActivity {
     void writePdf(Uri uri)throws Exception{
         PdfDocument pdf=new PdfDocument();PdfDocument.PageInfo pi=new PdfDocument.PageInfo.Builder(595,842,1).create();PdfDocument.Page page=pdf.startPage(pi);Canvas c=page.getCanvas();Paint p=new Paint(3);p.setColor(GREEN);c.drawRect(0,0,595,90,p);p.setColor(Color.WHITE);p.setTextSize(25);p.setFakeBoldText(true);c.drawText("Meine Finanzen",38,52,p);p.setTextSize(12);p.setFakeBoldText(false);c.drawText("Konto: "+db.accountName(accountId)+"   |   "+(selectedMonth==0?"Ganzes Jahr":months[selectedMonth-1])+" "+selectedYear,38,74,p);
         int y=130;p.setColor(DARK);p.setTextSize(12);p.setFakeBoldText(true);c.drawText("Zweck",38,y,p);c.drawText("Datum",330,y,p);c.drawText("Betrag CHF",440,y,p);y+=22;p.setFakeBoldText(false);
-        for(String[]r:exportRows){if(y>790){pdf.finishPage(page);pi=new PdfDocument.PageInfo.Builder(595,842,2).create();page=pdf.startPage(pi);c=page.getCanvas();y=55;}p.setColor(r[3].equals("Einnahme")?GREEN:RED);c.drawText(r[0].length()>42?r[0].substring(0,39)+"...":r[0],38,y,p);p.setColor(DARK);c.drawText(r[1],330,y,p);c.drawText(r[2],440,y,p);y+=24;}
+        int pageNumber=1;
+        for(String[]r:exportRows){
+            if(y>770){pdf.finishPage(page);pageNumber++;pi=new PdfDocument.PageInfo.Builder(595,842,pageNumber).create();page=pdf.startPage(pi);c=page.getCanvas();y=55;}
+            p.setColor(DARK);p.setTextSize(12);c.drawText(r[0].length()>42?r[0].substring(0,39)+"...":r[0],38,y,p);c.drawText(r[1],330,y,p);
+            int amountColor=r[3].equals("Einnahme")?GREEN:RED;
+            p.setColor(r[3].equals("Einnahme")?0xFFE3F3E8:0xFFFBE5E7);
+            c.drawRoundRect(432,y-16,558,y+5,7,7,p);
+            p.setColor(amountColor);p.setFakeBoldText(true);c.drawText(r[2],440,y,p);p.setFakeBoldText(false);y+=24;
+        }
+        double currentBalance=db.accountBalance(accountId);
+        p.setColor(0xFFEAF1FA);c.drawRoundRect(330,790,558,824,8,8,p);
+        p.setColor(BLUE);p.setTextSize(13);p.setFakeBoldText(true);String saldoText="Aktueller Saldo: "+money(currentBalance);float saldoWidth=p.measureText(saldoText);c.drawText(saldoText,550-saldoWidth,812,p);p.setFakeBoldText(false);
         pdf.finishPage(page);try(OutputStream o=getContentResolver().openOutputStream(uri)){pdf.writeTo(o);}pdf.close();toast("PDF im A4-Format gespeichert.");
     }
     void menu(){String[]opts={"Konten verwalten","PIN / Fingerabdruck","Datensicherung","Abbrechen"};new AlertDialog.Builder(this).setTitle("Menü").setItems(opts,(d,w)->{if(w==0)accountsDialog();if(w==1)securityDialog();if(w==2)backupDialog();}).show();}
@@ -131,6 +142,7 @@ public class MainActivity extends AppCompatActivity {
         int accountId(String n){try(Cursor c=getReadableDatabase().rawQuery("SELECT id FROM accounts WHERE name=?",new String[]{n})){return c.moveToFirst()?c.getInt(0):-1;}}
         String accountName(int id){try(Cursor c=getReadableDatabase().rawQuery("SELECT name FROM accounts WHERE id=?",new String[]{""+id})){return c.moveToFirst()?c.getString(0):"";}}
         int countAccounts(){try(Cursor c=getReadableDatabase().rawQuery("SELECT COUNT(*) FROM accounts",null)){return c.moveToFirst()?c.getInt(0):0;}}
+        double accountBalance(int id){try(Cursor c=getReadableDatabase().rawQuery("SELECT COALESCE(SUM(CASE WHEN income=1 THEN amount ELSE -amount END),0) FROM entries WHERE account_id=?",new String[]{""+id})){return c.moveToFirst()?c.getDouble(0):0;}}
         void addEntry(int id,String p,String date,double amount,boolean income){getWritableDatabase().execSQL("INSERT INTO entries(account_id,purpose,date,amount,income) VALUES(?,?,?,?,?)",new Object[]{id,p,date,amount,income?1:0});}
         void updateEntry(int id,String p,String date,double amount,boolean income){getWritableDatabase().execSQL("UPDATE entries SET purpose=?,date=?,amount=?,income=? WHERE id=?",new Object[]{p,date,amount,income?1:0,id});}
         void deleteEntry(int id){getWritableDatabase().execSQL("DELETE FROM entries WHERE id=?",new Object[]{id});}
