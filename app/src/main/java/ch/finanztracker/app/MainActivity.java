@@ -13,6 +13,9 @@ import android.text.InputType;
 import android.view.*;
 import android.widget.*;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.biometric.BiometricManager;
+import androidx.biometric.BiometricPrompt;
+import androidx.core.content.ContextCompat;
 import java.io.*;
 import java.text.*;
 import java.util.*;
@@ -122,9 +125,52 @@ public class MainActivity extends AppCompatActivity {
     void accountsDialog(){String[]opts={"Konto hinzufügen","Konto umbenennen","Konto löschen"};new AlertDialog.Builder(this).setTitle("Konten verwalten").setItems(opts,(d,w)->{if(w==0)askText("Neues Konto",name->{db.addAccount(name);accountId=-1;reloadAccounts();refresh();});else if(w==1)askText("Neuer Kontoname",name->{db.renameAccount(accountId,name);reloadAccounts();refresh();});else new AlertDialog.Builder(this).setMessage("Konto und alle zugehörigen Einträge löschen?").setNegativeButton("Abbrechen",null).setPositiveButton("Löschen",(a,b)->{db.deleteAccount(accountId);ensureAccount();accountId=-1;reloadAccounts();refresh();}).show();}).show();}
     interface TextDone{void done(String s);}
     void askText(String title,TextDone done){EditText e=new EditText(this);e.setHint("Name");new AlertDialog.Builder(this).setTitle(title).setView(e).setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{String s=e.getText().toString().trim();if(!s.isEmpty())done.done(s);}).show();}
-    void securityDialog(){String[]opts={"PIN aktivieren / deaktivieren","PIN ändern","Fingerabdruck (Geräteeinstellung)"};new AlertDialog.Builder(this).setTitle("Sicherheit").setItems(opts,(d,w)->{if(w==0){boolean on=getPreferences(0).getBoolean("pin_on",false);if(on){getPreferences(0).edit().putBoolean("pin_on",false).apply();toast("PIN-Abfrage deaktiviert.");}else setNewPin();}else if(w==1)setNewPin();else toast("Biometrische Anmeldung ist in dieser Projektversion noch nicht aktiviert.");}).show();}
-    void setNewPin(){EditText e=new EditText(this);e.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);e.setHint("Neue PIN (mind. 4 Ziffern)");new AlertDialog.Builder(this).setTitle("PIN festlegen").setView(e).setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{String p=e.getText().toString();if(p.length()<4){toast("PIN muss mindestens 4 Ziffern haben.");return;}getPreferences(0).edit().putString("pin",p).putBoolean("pin_on",true).apply();toast("PIN aktiviert.");}).show();}
-    void checkPin(){if(!getPreferences(0).getBoolean("pin_on",false))return;EditText e=new EditText(this);e.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);new AlertDialog.Builder(this).setTitle("PIN eingeben").setMessage("Bitte PIN zum Öffnen eingeben.").setView(e).setCancelable(false).setPositiveButton("Entsperren",(d,w)->{if(!e.getText().toString().equals(getPreferences(0).getString("pin","")))finish();}).show();}
+    void securityDialog(){
+        boolean pinOn=getPreferences(0).getBoolean("pin_on",false);
+        boolean bioOn=getPreferences(0).getBoolean("bio_on",false);
+        String[]opts={"PIN "+(pinOn?"deaktivieren":"aktivieren"),"PIN ändern","Fingerabdruck "+(bioOn?"deaktivieren":"aktivieren")};
+        new AlertDialog.Builder(this).setTitle("Sicherheit").setItems(opts,(d,w)->{
+            if(w==0){if(pinOn){getPreferences(0).edit().putBoolean("pin_on",false).putBoolean("bio_on",false).apply();toast("PIN-Abfrage deaktiviert.");}else setNewPin();}
+            else if(w==1)setNewPin();
+            else toggleBiometric();
+        }).show();
+    }
+    void setNewPin(){
+        EditText e=new EditText(this);e.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);e.setHint("Neue PIN (mind. 4 Ziffern)");
+        new AlertDialog.Builder(this).setTitle("PIN festlegen").setView(e).setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{
+            String p=e.getText().toString();if(p.length()<4){toast("PIN muss mindestens 4 Ziffern haben.");return;}
+            getPreferences(0).edit().putString("pin",p).putBoolean("pin_on",true).apply();toast("PIN aktiviert.");
+        }).show();
+    }
+    void toggleBiometric(){
+        boolean enabled=getPreferences(0).getBoolean("bio_on",false);
+        if(enabled){getPreferences(0).edit().putBoolean("bio_on",false).apply();toast("Fingerabdruck-Anmeldung deaktiviert.");return;}
+        if(!getPreferences(0).getBoolean("pin_on",false)){toast("Bitte zuerst eine PIN aktivieren. Sie dient als Ersatz, falls der Fingerabdruck nicht verfügbar ist.");return;}
+        BiometricManager manager=BiometricManager.from(this);
+        if(manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)!=BiometricManager.BIOMETRIC_SUCCESS){toast("Auf diesem Gerät ist kein verwendbarer Fingerabdruck eingerichtet.");return;}
+        getPreferences(0).edit().putBoolean("bio_on",true).apply();toast("Fingerabdruck-Anmeldung aktiviert.");
+    }
+    void checkPin(){
+        if(!getPreferences(0).getBoolean("pin_on",false))return;
+        if(getPreferences(0).getBoolean("bio_on",false)){showBiometricPrompt();return;}
+        showPinDialog();
+    }
+    void showBiometricPrompt(){
+        BiometricManager manager=BiometricManager.from(this);
+        if(manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)!=BiometricManager.BIOMETRIC_SUCCESS){showPinDialog();return;}
+        BiometricPrompt prompt=new BiometricPrompt(this,ContextCompat.getMainExecutor(this),new BiometricPrompt.AuthenticationCallback(){
+            @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result){super.onAuthenticationSucceeded(result);}
+            @Override public void onAuthenticationError(int errorCode,CharSequence errString){super.onAuthenticationError(errorCode,errString);showPinDialog();}
+        });
+        BiometricPrompt.PromptInfo info=new BiometricPrompt.PromptInfo.Builder().setTitle("Meine Finanzen entsperren").setSubtitle("Mit Fingerabdruck anmelden").setNegativeButtonText("Mit PIN fortfahren").build();
+        prompt.authenticate(info);
+    }
+    void showPinDialog(){
+        EditText e=new EditText(this);e.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);e.setHint("PIN");
+        new AlertDialog.Builder(this).setTitle("PIN eingeben").setMessage("Bitte PIN zum Öffnen eingeben.").setView(e).setCancelable(false)
+            .setPositiveButton("Entsperren",(d,w)->{if(!e.getText().toString().equals(getPreferences(0).getString("pin",""))){toast("PIN falsch. Bitte App erneut öffnen und nochmals versuchen.");finish();}})
+            .setNegativeButton("Beenden",(d,w)->finish()).show();
+    }
     void backupDialog(){new AlertDialog.Builder(this).setTitle("Datensicherung").setItems(new String[]{"Backup auf Gerät speichern","Backup importieren / wiederherstellen","Cloud-Backup (Google Drive / OneDrive)"},(d,w)->{Intent i=new Intent(w==1?Intent.ACTION_OPEN_DOCUMENT:Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);if(w==1){i.setType("application/json");startActivityForResult(i,REQ_RESTORE);}else if(w==0){i.setType("application/json");i.putExtra(Intent.EXTRA_TITLE,"Meine-Finanzen-Backup.json");startActivityForResult(i,REQ_BACKUP);}else toast("Cloud-Sicherung benötigt eine persönliche Google-Drive- oder OneDrive-Anmeldung und wird in einem nächsten Ausbauschritt eingerichtet.");}).show();}
     void writeBackup(Uri uri)throws Exception{org.json.JSONArray aa=new org.json.JSONArray(),ee=new org.json.JSONArray();for(String a:db.accounts())aa.put(a);Cursor c=db.allEntries();while(c.moveToNext()){org.json.JSONObject o=new org.json.JSONObject();o.put("account",c.getString(1));o.put("purpose",c.getString(2));o.put("date",c.getString(3));o.put("amount",c.getDouble(4));o.put("income",c.getInt(5)==1);ee.put(o);}c.close();org.json.JSONObject root=new org.json.JSONObject();root.put("accounts",aa);root.put("entries",ee);try(Writer w=new OutputStreamWriter(getContentResolver().openOutputStream(uri),"UTF-8")){w.write(root.toString(2));}toast("Backup gespeichert.");}
     void readBackup(Uri uri)throws Exception{StringBuilder s=new StringBuilder();try(BufferedReader r=new BufferedReader(new InputStreamReader(getContentResolver().openInputStream(uri),"UTF-8"))){String line;while((line=r.readLine())!=null)s.append(line);}org.json.JSONObject j=new org.json.JSONObject(s.toString());db.clearAll();org.json.JSONArray aa=j.getJSONArray("accounts");for(int i=0;i<aa.length();i++)db.addAccount(aa.getString(i));org.json.JSONArray ee=j.getJSONArray("entries");for(int i=0;i<ee.length();i++){org.json.JSONObject o=ee.getJSONObject(i);int aid=db.accountId(o.getString("account"));db.addEntry(aid,o.getString("purpose"),o.getString("date"),o.getDouble("amount"),o.getBoolean("income"));}accountId=-1;reloadAccounts();refresh();toast("Backup wiederhergestellt.");}
