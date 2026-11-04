@@ -29,6 +29,7 @@ public class MainActivity extends AppCompatActivity {
     int selectedMonth=Calendar.getInstance().get(Calendar.MONTH)+1, selectedYear=Calendar.getInstance().get(Calendar.YEAR);
     final int REQ_CSV=11, REQ_PDF=12, REQ_BACKUP=13, REQ_RESTORE=14, REQ_CLOUD_FOLDER=15;
     ArrayList<String[]> exportRows=new ArrayList<>();
+    String pendingCloudProvider="";
 
     @Override public void onCreate(Bundle b){super.onCreate(b); getWindow().setStatusBarColor(0xFF126B43); getWindow().setNavigationBarColor(0xFFFFFFFF); getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR); db=new DB(this); ensureAccount(); buildUI(); checkPin();}
     @Override protected void onStop(){super.onStop();saveAutomaticBackup();}
@@ -175,21 +176,37 @@ public class MainActivity extends AppCompatActivity {
     }
     void backupDialog(){
         boolean cloud=getPreferences(0).contains("cloud_tree_uri");
-        String[] opts={"Backup auf Gerät speichern","Backup importieren / wiederherstellen",cloud?"Cloud-Ordner ändern (Google Drive / OneDrive)":"Cloud-Backup einrichten (Google Drive / OneDrive)","Cloud-Backup deaktivieren"};
+        String provider=getPreferences(0).getString("cloud_provider","");
+        String cloudLabel=provider.isEmpty()?"Cloud-Backup":("Cloud-Backup ("+provider+")");
+        String[] opts={"Backup auf Gerät speichern","Backup importieren / wiederherstellen",cloud?cloudLabel+" ändern":"Cloud-Backup einrichten","Cloud-Backup deaktivieren"};
         new AlertDialog.Builder(this).setTitle("Datensicherung").setItems(opts,(d,w)->{
             if(w==0){Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");i.putExtra(Intent.EXTRA_TITLE,"Meine-Finanzen-Backup.json");startActivityForResult(i,REQ_BACKUP);}
             else if(w==1){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");startActivityForResult(i,REQ_RESTORE);}
-            else if(w==2){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(i,REQ_CLOUD_FOLDER);}
-            else if(w==3){getPreferences(0).edit().remove("cloud_tree_uri").apply();toast("Cloud-Backup deaktiviert. Die lokale automatische Sicherung bleibt aktiv.");}
+            else if(w==2)chooseCloudProvider();
+            else if(w==3){getPreferences(0).edit().remove("cloud_tree_uri").remove("cloud_provider").apply();toast("Cloud-Backup deaktiviert. Die lokale automatische Sicherung bleibt aktiv.");}
         }).show();
+    }
+    void chooseCloudProvider(){
+        new AlertDialog.Builder(this).setTitle("Cloud-Anbieter auswählen")
+            .setItems(new String[]{"Google Drive","OneDrive"},(dialog,which)->{
+                pendingCloudProvider=which==0?"Google Drive":"OneDrive";
+                toast("Wähle im nächsten Fenster "+pendingCloudProvider+". Falls nötig, melde dich dort an und wähle oder erstelle einen Backup-Ordner.");
+                Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                startActivityForResult(i,REQ_CLOUD_FOLDER);
+            }).show();
     }
     void saveCloudFolder(Intent data){
         Uri tree=data.getData();if(tree==null)return;
         int flags=data.getFlags()&(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
         try{getContentResolver().takePersistableUriPermission(tree,flags);}catch(Exception ignored){}
-        getPreferences(0).edit().putString("cloud_tree_uri",tree.toString()).apply();
+        android.content.SharedPreferences.Editor pref=getPreferences(0).edit().putString("cloud_tree_uri",tree.toString());
+        if(!pendingCloudProvider.isEmpty())pref.putString("cloud_provider",pendingCloudProvider);
+        pref.apply();
+        String provider=pendingCloudProvider.isEmpty()?"Cloud":pendingCloudProvider;
+        pendingCloudProvider="";
         saveAutomaticBackup();
-        toast("Cloud-Ordner eingerichtet. Die Sicherung wird ab jetzt automatisch aktualisiert.");
+        toast(provider+"-Ordner eingerichtet. Die Sicherung wird ab jetzt automatisch aktualisiert.");
     }
     void saveAutomaticBackup(){
         try{
