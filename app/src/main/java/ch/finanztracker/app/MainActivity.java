@@ -303,7 +303,7 @@ public class MainActivity extends AppCompatActivity {
         try{Uri u=data.getData();if(request==REQ_CSV)writeCsv(u);else if(request==REQ_PDF)writePdf(u);else if(request==REQ_BACKUP)writeBackup(u);else if(request==REQ_RESTORE)readBackup(u);else if(request==REQ_CLOUD_FOLDER)saveCloudFolder(data);else if(request==REQ_RECEIPT_PDF)writeReceiptPdf(u);}
         catch(Exception e){toast("Datei konnte nicht verarbeitet werden: "+e.getMessage());}
     }
-    void writeCsv(Uri uri)throws Exception{try(Writer w=new OutputStreamWriter(getContentResolver().openOutputStream(uri),"UTF-8")){w.write("\uFEFFZweck;Datum;Betrag CHF;Art\n");for(String[]r:exportRows)w.write(csv(r[0])+";"+r[1]+";"+r[2].replace(".",",")+";"+r[3]+"\n");}toast("Excel-Datei gespeichert.");}
+    void writeCsv(Uri uri)throws Exception{try(Writer w=new OutputStreamWriter(getContentResolver().openOutputStream(uri),"UTF-8")){w.write("\uFEFFZweck;Datum / Uhrzeit;Betrag CHF;Art\n");for(String[]r:exportRows)w.write(csv(r[0])+";"+r[1]+";"+r[2].replace(".",",")+";"+r[3]+"\n");}toast("Excel-Datei gespeichert.");}
     String csv(String s){String q=String.valueOf((char)34);return q+s.replace(q,q+q)+q;}
     void writePdf(Uri uri)throws Exception{
         PdfDocument pdf=new PdfDocument();PdfDocument.PageInfo pi=new PdfDocument.PageInfo.Builder(595,842,1).create();PdfDocument.Page page=pdf.startPage(pi);Canvas c=page.getCanvas();Paint p=new Paint(3);p.setColor(GREEN);c.drawRect(0,0,595,90,p);p.setColor(Color.WHITE);p.setTextSize(25);p.setFakeBoldText(true);c.drawText("Meine Finanzen",38,52,p);p.setTextSize(12);p.setFakeBoldText(false);c.drawText("Konto: "+db.accountName(accountId)+"   |   "+(selectedMonth==0?"Ganzes Jahr":months[selectedMonth-1])+" "+selectedYear,38,74,p);
