@@ -17,12 +17,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Prepare stable signing key
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > app/stable-signing.jks
       - name: Show Android signing fingerprints
         run: gradle :app:signingReport
       - name: Build debug APK
         run: gradle assembleDebug
-      - name: Read Android debug certificate SHA-1
-        run: keytool -list -v -keystore "$HOME/.config/.android/debug.keystore" -storepass android -alias AndroidDebugKey | grep -E "SHA1:|SHA-1:"
       - uses: actions/upload-artifact@v4
         with:
           name: meine-finanzen-debug-apk
