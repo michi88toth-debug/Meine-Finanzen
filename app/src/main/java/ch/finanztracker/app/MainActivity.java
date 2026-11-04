@@ -86,7 +86,7 @@ public class MainActivity extends AppCompatActivity {
     }
     void restoreGoogleDriveBackup(){
         pendingGoogleRestore=true;
-        if(googleAccessToken!=null&&System.currentTimeMillis()<googleTokenValidUntil)downloadGoogleDriveBackup();
+        if(googleAccessToken!=null&&System.currentTimeMillis()<googleTokenValidUntil){pendingGoogleRestore=false;downloadGoogleDriveBackup();}
         else authorizeGoogleDrive(true);
     }
     void downloadGoogleDriveBackup(){
