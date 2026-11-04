@@ -96,8 +96,8 @@ public class MainActivity extends AppCompatActivity {
                     okhttp3.RequestBody metadata=okhttp3.RequestBody.create("{\"name\":\"Meine-Finanzen-Backup.json\"}",media);
                     okhttp3.RequestBody multipart=new okhttp3.MultipartBody.Builder()
                         .setType(okhttp3.MediaType.parse("multipart/related"))
-                        .addPart(okhttp3.Headers.of("Content-Type","application/json; charset=UTF-8"),metadata)
-                        .addPart(okhttp3.Headers.of("Content-Type","application/json; charset=UTF-8"),body).build();
+                        .addPart(metadata)
+                        .addPart(body).build();
                     request=new okhttp3.Request.Builder().url("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id")
                         .header("Authorization","Bearer "+token).post(multipart).build();
                 }else{
