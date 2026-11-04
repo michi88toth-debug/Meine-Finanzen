@@ -185,7 +185,7 @@ public class MainActivity extends AppCompatActivity {
         TextView coin=text("🪙",29,0xFFFFFFFF,true);header.addView(coin);
         accountSpin=new Spinner(this);LinearLayout accountBox=column();accountBox.setPadding(dp(16),dp(8),dp(16),dp(4));accountBox.addView(text("Konto auswählen",12,0xFF52645A,true));accountBox.addView(accountSpin,lp(-1,48));root.addView(accountBox);
         LinearLayout actions=row();actions.setPadding(dp(16),dp(6),dp(16),dp(8));root.addView(actions,lp(-1,86));
-        Button plus=button("+  Einnahme",GREEN),minus=button("−  Ausgabe",RED);plus.setTextSize(19);minus.setTextSize(19);
+        Button plus=button("+",GREEN),minus=button("−",RED);plus.setTextSize(30);minus.setTextSize(30);plus.setContentDescription("Einnahme hinzufügen");minus.setContentDescription("Ausgabe hinzufügen");
         LinearLayout.LayoutParams ap=lp(0,68);ap.weight=1;ap.rightMargin=dp(6);actions.addView(plus,ap);LinearLayout.LayoutParams mp=lp(0,68);mp.weight=1;mp.leftMargin=dp(6);actions.addView(minus,mp);
         plus.setOnClickListener(v->entryDialog(true,null));minus.setOnClickListener(v->entryDialog(false,null));
         LinearLayout filters=row();filters.setPadding(dp(16),dp(4),dp(16),dp(8));root.addView(filters,lp(-1,62));
@@ -265,16 +265,16 @@ public class MainActivity extends AppCompatActivity {
         p.setColor(BLUE);p.setTextSize(13);p.setFakeBoldText(true);String saldoText="Aktueller Saldo: "+money(currentBalance);float saldoWidth=p.measureText(saldoText);c.drawText(saldoText,550-saldoWidth,812,p);p.setFakeBoldText(false);
         pdf.finishPage(page);try(OutputStream o=getContentResolver().openOutputStream(uri)){pdf.writeTo(o);}pdf.close();toast("PDF im A4-Format gespeichert.");
     }
-    void menu(){String[]opts={"Konten verwalten","PIN / Fingerabdruck","Datensicherung","Abbrechen"};new AlertDialog.Builder(this).setTitle("Menü").setItems(opts,(d,w)->{if(w==0)accountsDialog();if(w==1)securityDialog();if(w==2)backupDialog();}).show();}
+    void menu(){String[]opts={"Konten verwalten","Sicherheit","Datensicherung","Abbrechen"};new AlertDialog.Builder(this).setTitle("Menü").setItems(opts,(d,w)->{if(w==0)accountsDialog();if(w==1)securityDialog();if(w==2)backupDialog();}).show();}
     void accountsDialog(){String[]opts={"Konto hinzufügen","Konto umbenennen","Konto löschen"};new AlertDialog.Builder(this).setTitle("Konten verwalten").setItems(opts,(d,w)->{if(w==0)askText("Neues Konto",name->{db.addAccount(name);accountId=-1;reloadAccounts();refresh();});else if(w==1)askText("Neuer Kontoname",name->{db.renameAccount(accountId,name);reloadAccounts();refresh();});else new AlertDialog.Builder(this).setMessage("Konto und alle zugehörigen Einträge löschen?").setNegativeButton("Abbrechen",null).setPositiveButton("Löschen",(a,b)->{db.deleteAccount(accountId);ensureAccount();accountId=-1;reloadAccounts();refresh();}).show();}).show();}
     interface TextDone{void done(String s);}
     void askText(String title,TextDone done){EditText e=new EditText(this);e.setHint("Name");new AlertDialog.Builder(this).setTitle(title).setView(e).setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{String s=e.getText().toString().trim();if(!s.isEmpty())done.done(s);}).show();}
     void securityDialog(){
         boolean pinOn=getPreferences(0).getBoolean("pin_on",false);
         boolean bioOn=getPreferences(0).getBoolean("bio_on",false);
-        String[]opts={"PIN "+(pinOn?"deaktivieren":"aktivieren"),"PIN ändern","Fingerabdruck "+(bioOn?"deaktivieren":"aktivieren")};
+        String[]opts={"PIN-Abfrage "+(pinOn?"deaktivieren":"aktivieren"),"PIN ändern","Fingerabdruck "+(bioOn?"deaktivieren":"aktivieren")};
         new AlertDialog.Builder(this).setTitle("Sicherheit").setItems(opts,(d,w)->{
-            if(w==0){if(pinOn){getPreferences(0).edit().putBoolean("pin_on",false).putBoolean("bio_on",false).apply();toast("PIN-Abfrage deaktiviert.");}else setNewPin();}
+            if(w==0){if(pinOn){getPreferences(0).edit().putBoolean("pin_on",false).apply();toast("PIN-Abfrage deaktiviert.");}else setNewPin();}
             else if(w==1)setNewPin();
             else toggleBiometric();
         }).show();
@@ -289,15 +289,30 @@ public class MainActivity extends AppCompatActivity {
     void toggleBiometric(){
         boolean enabled=getPreferences(0).getBoolean("bio_on",false);
         if(enabled){getPreferences(0).edit().putBoolean("bio_on",false).apply();toast("Fingerabdruck-Anmeldung deaktiviert.");return;}
-        if(!getPreferences(0).getBoolean("pin_on",false)){toast("Bitte zuerst eine PIN aktivieren. Sie dient als Ersatz, falls der Fingerabdruck nicht verfügbar ist.");return;}
         BiometricManager manager=BiometricManager.from(this);
         if(manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)!=BiometricManager.BIOMETRIC_SUCCESS){toast("Auf diesem Gerät ist kein verwendbarer Fingerabdruck eingerichtet.");return;}
-        getPreferences(0).edit().putBoolean("bio_on",true).apply();toast("Fingerabdruck-Anmeldung aktiviert.");
+        String savedPin=getPreferences(0).getString("pin","");
+        if(savedPin.isEmpty()){setBiometricPin();return;}
+        EditText e=new EditText(this);e.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);e.setHint("Vorhandene PIN bestätigen");
+        new AlertDialog.Builder(this).setTitle("Fingerabdruck aktivieren").setMessage("Bitte bestätige deine PIN. Die PIN-Abfrage beim App-Start bleibt davon unabhängig.").setView(e)
+            .setNegativeButton("Abbrechen",null).setPositiveButton("Bestätigen",(d,w)->{
+                if(!e.getText().toString().equals(getPreferences(0).getString("pin",""))){toast("PIN ist nicht korrekt.");return;}
+                getPreferences(0).edit().putBoolean("bio_on",true).apply();toast("Fingerabdruck-Anmeldung aktiviert.");
+            }).show();
+    }
+    void setBiometricPin(){
+        EditText e=new EditText(this);e.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);e.setHint("PIN (mind. 4 Ziffern)");
+        new AlertDialog.Builder(this).setTitle("PIN für Fingerabdruck festlegen").setMessage("Diese PIN dient als Ersatz, falls der Fingerabdruck nicht funktioniert. Die PIN-Abfrage beim App-Start wird nicht aktiviert.").setView(e)
+            .setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{
+                String p=e.getText().toString();if(p.length()<4){toast("PIN muss mindestens 4 Ziffern haben.");return;}
+                getPreferences(0).edit().putString("pin",p).putBoolean("bio_on",true).apply();toast("Fingerabdruck-Anmeldung aktiviert.");
+            }).show();
     }
     void checkPin(){
-        if(!getPreferences(0).getBoolean("pin_on",false))return;
-        if(getPreferences(0).getBoolean("bio_on",false)){showBiometricPrompt();return;}
-        showPinDialog();
+        boolean pinOn=getPreferences(0).getBoolean("pin_on",false);
+        boolean bioOn=getPreferences(0).getBoolean("bio_on",false);
+        if(bioOn){showBiometricPrompt();return;}
+        if(pinOn)showPinDialog();
     }
     void showBiometricPrompt(){
         BiometricManager manager=BiometricManager.from(this);
