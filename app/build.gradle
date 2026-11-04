@@ -1,5 +1,14 @@
 plugins { id 'com.android.application' }
 
+def stableKeystore = file('stable-signing.jks')
+def stableStorePassword = System.getenv('ANDROID_KEYSTORE_PASSWORD')
+def stableKeyAlias = System.getenv('ANDROID_KEY_ALIAS')
+def stableKeyPassword = System.getenv('ANDROID_KEY_PASSWORD')
+def hasStableSigning = stableKeystore.exists() &&
+        stableStorePassword &&
+        stableKeyAlias &&
+        stableKeyPassword
+
 android {
     namespace 'ch.finanztracker.app'
     compileSdk 35
@@ -9,6 +18,23 @@ android {
         targetSdk 34
         versionCode 1
         versionName '1.0'
+    }
+    signingConfigs {
+        if (hasStableSigning) {
+            stable {
+                storeFile stableKeystore
+                storePassword stableStorePassword
+                keyAlias stableKeyAlias
+                keyPassword stableKeyPassword
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            if (hasStableSigning) {
+                signingConfig signingConfigs.stable
+            }
+        }
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
