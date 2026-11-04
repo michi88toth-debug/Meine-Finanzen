@@ -21,6 +21,8 @@ jobs:
         run: gradle :app:signingReport
       - name: Build debug APK
         run: gradle assembleDebug
+      - name: Read Android debug certificate SHA-1
+        run: keytool -list -v -keystore "$HOME/.config/.android/debug.keystore" -storepass android -alias AndroidDebugKey | grep -E "SHA1:|SHA-1:"
       - uses: actions/upload-artifact@v4
         with:
           name: meine-finanzen-debug-apk
