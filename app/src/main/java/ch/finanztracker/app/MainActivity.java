@@ -193,9 +193,14 @@ public class MainActivity extends AppCompatActivity {
                         if(newId.isEmpty())throw new IOException("Keine Datei-ID erhalten.");
                         getPreferences(0).edit().putString("google_drive_file_id",newId).apply();
                     }else getPreferences(0).edit().putString("google_drive_file_id",savedId).apply();
+                    String fingerprint=backupFingerprint(json);
+                    getPreferences(0).edit().putString("google_drive_backup_fingerprint",fingerprint).apply();
                     runOnUiThread(()->toast("Backup erfolgreich in Google Drive gespeichert."));
                 }
-            }catch(Exception e){android.util.Log.e("MeineFinanzen","Google-Drive-Backup fehlgeschlagen",e);String detail=e.toString();for(Throwable cause=e.getCause();cause!=null;cause=cause.getCause())detail+="\nUrsache: "+cause;final String errorDetail=detail;runOnUiThread(()->showErrorDialog("Google-Drive-Backup fehlgeschlagen",errorDetail));}
+            }catch(Exception e){
+                android.util.Log.e("MeineFinanzen","Google-Drive-Backup fehlgeschlagen",e);
+                runOnUiThread(()->toast("Google-Drive-Backup nicht möglich. Bitte Internetverbindung prüfen; es wird später erneut versucht."));
+            }
         });
     }
     @Override protected void onStop(){super.onStop();needsUnlockOnResume=true;saveAutomaticBackup();}
@@ -411,16 +416,28 @@ public class MainActivity extends AppCompatActivity {
     void saveAutomaticBackup(){
         try{
             String provider=getPreferences(0).getString("cloud_provider","");
-            if("Google Drive".equals(provider)){
-                if(googleAccessToken!=null&&System.currentTimeMillis()<googleTokenValidUntil)uploadGoogleDriveBackup();
-                else authorizeGoogleDrive(false);
-            }
             String json=backupJson();
             File local=new File(getFilesDir(),"Meine-Finanzen-Backup.json");
             try(Writer w=new OutputStreamWriter(new FileOutputStream(local),"UTF-8")){w.write(json);}
             String saved=getPreferences(0).getString("cloud_tree_uri",null);
             if(saved!=null)writeTreeBackup(Uri.parse(saved),json);
+            // Google Drive nur synchronisieren, wenn sich Konten oder Buchungen geändert haben.
+            // Das verhindert unnötige Netzwerkanfragen beim Öffnen/Schliessen des Android-Dateiauswahldialogs.
+            if("Google Drive".equals(provider)){
+                String fingerprint=backupFingerprint(json);
+                String lastFingerprint=getPreferences(0).getString("google_drive_backup_fingerprint","");
+                if(!fingerprint.equals(lastFingerprint)){
+                    if(googleAccessToken!=null&&System.currentTimeMillis()<googleTokenValidUntil)uploadGoogleDriveBackup();
+                    else authorizeGoogleDrive(false);
+                }
+            }
         }catch(Exception e){android.util.Log.e("MeineFinanzen","Automatisches Backup fehlgeschlagen",e);}
+    }
+    String backupFingerprint(String json)throws Exception{
+        org.json.JSONObject data=new org.json.JSONObject(json);
+        data.remove("created_at");
+        byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(data.toString().getBytes("UTF-8"));
+        return android.util.Base64.encodeToString(digest,android.util.Base64.NO_WRAP);
     }
     void writeTreeBackup(Uri tree,String json)throws Exception{
         String folderName="MeineFinanzen",fileName="Meine-Finanzen-Backup.json";Uri folderUri=null;
