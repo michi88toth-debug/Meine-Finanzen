@@ -34,7 +34,7 @@ public class MainActivity extends AppCompatActivity {
     TextView expenses, incomes, balance; ArrayList<String> accounts=new ArrayList<>(); int accountId=-1;
     String[] months={"Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember","Ganzes Jahr"};
     int selectedMonth=Calendar.getInstance().get(Calendar.MONTH)+1, selectedYear=Calendar.getInstance().get(Calendar.YEAR);
-    final int REQ_CSV=11, REQ_PDF=12, REQ_BACKUP=13, REQ_RESTORE=14, REQ_CLOUD_FOLDER=15;
+    final int REQ_CSV=11, REQ_PDF=12, REQ_BACKUP=13, REQ_RESTORE=14, REQ_CLOUD_FOLDER=15, REQ_RECEIPT_CAMERA=17, REQ_RECEIPT_PDF=18;
     ArrayList<String[]> exportRows=new ArrayList<>();
     String pendingCloudProvider="";
     static final int REQ_GOOGLE_AUTH=16;
@@ -45,6 +45,7 @@ public class MainActivity extends AppCompatActivity {
     boolean pendingGoogleRestore=false;
     boolean needsUnlockOnResume=false;
     final ExecutorService cloudExecutor=Executors.newSingleThreadExecutor();
+    String activeReceiptPath=""; String pendingReceiptPdfPath=""; TextView receiptCameraButton;
 
     @Override public void onCreate(Bundle b){super.onCreate(b); getWindow().setStatusBarColor(0xFF126B43); getWindow().setNavigationBarColor(0xFFFFFFFF); getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR); db=new DB(this); ensureAccount(); buildUI(); checkPin(); trySilentGoogleAuthorization();}
 
@@ -261,6 +262,7 @@ public class MainActivity extends AppCompatActivity {
             View stripe=new View(this);stripe.setBackgroundColor(income?GREEN:RED);card.addView(stripe,lp(4,44));
             LinearLayout info=column();LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(0,-2,1);ip.leftMargin=dp(10);card.addView(info,ip);
             info.addView(text(purpose.isEmpty()?"Ohne Zweck":purpose,15,DARK,true));info.addView(text(date,12,0xFF718078,false));
+            if(c.getColumnCount()>5){String receiptPath=c.getString(5);if(receiptPath!=null&&!receiptPath.isEmpty()&&new File(receiptPath).exists()){TextView receipt=text("🧾",17,DARK,true);LinearLayout.LayoutParams rp=lp(28,32);rp.rightMargin=dp(5);card.addView(receipt,rp);receipt.setOnClickListener(v->showReceipt(receiptPath));}}
             TextView val=text((income?"+ ":"− ")+money(amount),15,income?GREEN:RED,true);card.addView(val);
             card.setOnClickListener(v->confirmEdit(id,purpose,date,amount,income));
         }
@@ -269,15 +271,26 @@ public class MainActivity extends AppCompatActivity {
     String money(double n){return String.format(Locale.GERMANY,"CHF %,.2f",n);}
     void entryDialog(boolean income,int[] existing){
         final EditText purpose=new EditText(this),amount=new EditText(this);purpose.setHint("Zweck");amount.setHint("Betrag in CHF");amount.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        LinearLayout box=column();box.setPadding(dp(20),dp(8),dp(20),0);box.addView(purpose);box.addView(amount);
+        LinearLayout box=column();box.setPadding(dp(20),dp(8),dp(20),0);
+        LinearLayout purposeRow=row();purposeRow.addView(purpose,new LinearLayout.LayoutParams(0,dp(52),1));
+        receiptCameraButton=text("📷",23,GREEN,true);receiptCameraButton.setGravity(Gravity.CENTER);purposeRow.addView(receiptCameraButton,lp(48,48));
+        receiptCameraButton.setOnClickListener(v->captureReceipt());box.addView(purposeRow);box.addView(amount);activeReceiptPath="";
         final Calendar cal=Calendar.getInstance();final TextView date=text("Datum: "+new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).format(cal.getTime())+"  ✎",15,GREEN,true);date.setPadding(0,dp(14),0,dp(8));box.addView(date);
         date.setOnClickListener(v->new DatePickerDialog(this,(view,yy,mm,dd)->{cal.set(yy,mm,dd);date.setText("Datum: "+String.format(Locale.GERMANY,"%02d.%02d.%04d",dd,mm+1,yy)+"  ✎");},cal.get(Calendar.YEAR),cal.get(Calendar.MONTH),cal.get(Calendar.DAY_OF_MONTH)).show());
-        if(existing!=null){Cursor e=db.one(existing[0]);if(e.moveToFirst()){purpose.setText(e.getString(1));amount.setText(""+e.getDouble(3));try{cal.setTime(new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).parse(e.getString(2)));}catch(Exception ignored){}date.setText("Datum: "+e.getString(2)+"  ✎");}e.close();}
+        if(existing!=null){Cursor e=db.one(existing[0]);if(e.moveToFirst()){purpose.setText(e.getString(1));amount.setText(""+e.getDouble(3));activeReceiptPath=e.getString(5)==null?"":e.getString(5);if(!activeReceiptPath.isEmpty()&&new File(activeReceiptPath).exists())receiptCameraButton.setText("🧾");try{cal.setTime(new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).parse(e.getString(2)));}catch(Exception ignored){}date.setText("Datum: "+e.getString(2)+"  ✎");}e.close();}
         new AlertDialog.Builder(this).setTitle(income?"Einnahme erfassen":"Ausgabe erfassen").setView(box).setNegativeButton("Abbrechen",null).setPositiveButton(existing==null?"Speichern":"Änderungen speichern",(d,w)->{
             String p=purpose.getText().toString().trim();String a=amount.getText().toString().trim().replace(",",".");if(a.isEmpty()){toast("Bitte einen Betrag eingeben.");return;}
-            try{double n=Double.parseDouble(a);if(n<=0)throw new Exception();String dt=new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).format(cal.getTime());if(existing==null)db.addEntry(accountId,p,dt,n,income);else db.updateEntry(existing[0],p,dt,n,income);refresh();}catch(Exception ex){toast("Bitte einen gültigen Betrag eingeben.");}
+            try{double n=Double.parseDouble(a);if(n<=0)throw new Exception();String dt=new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).format(cal.getTime());if(existing==null)db.addEntry(accountId,p,dt,n,income,activeReceiptPath);else db.updateEntry(existing[0],p,dt,n,income,activeReceiptPath);refresh();}catch(Exception ex){toast("Bitte einen gültigen Betrag eingeben.");}
         }).show();
     }
+    void captureReceipt(){
+        try{File dir=new File(getFilesDir(),"receipts");if(!dir.exists()&&!dir.mkdirs())throw new IOException("Quittungsordner konnte nicht erstellt werden.");File photo=new File(dir,"receipt_"+System.currentTimeMillis()+".jpg");activeReceiptPath=photo.getAbsolutePath();Uri uri=androidx.core.content.FileProvider.getUriForFile(this,getPackageName()+".fileprovider",photo);Intent camera=new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);camera.putExtra(android.provider.MediaStore.EXTRA_OUTPUT,uri);camera.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);camera.setClipData(ClipData.newUri(getContentResolver(),"Quittung",uri));if(camera.resolveActivity(getPackageManager())!=null)startActivityForResult(camera,REQ_RECEIPT_CAMERA);else{activeReceiptPath="";toast("Keine Kamera-App gefunden.");}}catch(Exception e){activeReceiptPath="";showErrorDialog("Kamera konnte nicht geöffnet werden",e.toString());}
+    }
+    void compressReceipt(File file)throws Exception{BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;BitmapFactory.decodeFile(file.getAbsolutePath(),bounds);int sample=1;while(bounds.outWidth/sample>2000||bounds.outHeight/sample>2000)sample*=2;BitmapFactory.Options options=new BitmapFactory.Options();options.inSampleSize=sample;Bitmap bitmap=BitmapFactory.decodeFile(file.getAbsolutePath(),options);if(bitmap==null)throw new IOException("Foto konnte nicht gelesen werden.");int max=1800;float scale=Math.min(1f,Math.min((float)max/bitmap.getWidth(),(float)max/bitmap.getHeight()));if(scale<1f){Bitmap scaled=Bitmap.createScaledBitmap(bitmap,Math.round(bitmap.getWidth()*scale),Math.round(bitmap.getHeight()*scale),true);bitmap.recycle();bitmap=scaled;}try(FileOutputStream out=new FileOutputStream(file,false)){if(!bitmap.compress(Bitmap.CompressFormat.JPEG,78,out))throw new IOException("Foto konnte nicht komprimiert werden.");out.flush();}bitmap.recycle();}
+    void showReceipt(String path){try{Bitmap bitmap=BitmapFactory.decodeFile(path);if(bitmap==null)throw new IOException("Quittungsbild kann nicht geöffnet werden.");ImageView image=new ImageView(this);image.setImageBitmap(bitmap);image.setAdjustViewBounds(true);image.setScaleType(ImageView.ScaleType.FIT_CENTER);ScrollView scroll=new ScrollView(this);scroll.addView(image);new AlertDialog.Builder(this).setTitle("Quittung").setView(scroll).setNegativeButton("Schliessen",null).setPositiveButton("Als PDF speichern",(d,w)->{pendingReceiptPdfPath=path;Intent save=new Intent(Intent.ACTION_CREATE_DOCUMENT);save.addCategory(Intent.CATEGORY_OPENABLE);save.setType("application/pdf");save.putExtra(Intent.EXTRA_TITLE,"Quittung.pdf");startActivityForResult(save,REQ_RECEIPT_PDF);}).show();}catch(Exception e){showErrorDialog("Quittung konnte nicht geöffnet werden",e.toString());}}
+    void writeReceiptPdf(Uri uri)throws Exception{Bitmap bitmap=BitmapFactory.decodeFile(pendingReceiptPdfPath);if(bitmap==null)throw new IOException("Quittungsbild ist nicht verfügbar.");PdfDocument pdf=new PdfDocument();PdfDocument.PageInfo info=new PdfDocument.PageInfo.Builder(595,842,1).create();PdfDocument.Page page=pdf.startPage(info);Canvas canvas=page.getCanvas();Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);float scale=Math.min(535f/bitmap.getWidth(),782f/bitmap.getHeight());float width=bitmap.getWidth()*scale,height=bitmap.getHeight()*scale;float left=(595-width)/2f,top=(842-height)/2f;canvas.drawBitmap(bitmap,null,new RectF(left,top,left+width,top+height),paint);pdf.finishPage(page);try(OutputStream out=getContentResolver().openOutputStream(uri)){if(out==null)throw new IOException("PDF-Datei kann nicht geschrieben werden.");pdf.writeTo(out);}pdf.close();bitmap.recycle();pendingReceiptPdfPath="";toast("Quittung als PDF gespeichert.");}
+    byte[] readFileBytes(String path)throws Exception{try(InputStream in=new FileInputStream(path);ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] buffer=new byte[8192];int n;while((n=in.read(buffer))!=-1)out.write(buffer,0,n);return out.toByteArray();}}
+    String restoreReceiptImage(String encoded)throws Exception{byte[] bytes=android.util.Base64.decode(encoded,android.util.Base64.DEFAULT);File dir=new File(getFilesDir(),"receipts");if(!dir.exists()&&!dir.mkdirs())throw new IOException("Quittungsordner konnte nicht erstellt werden.");File file=new File(dir,"restored_"+System.currentTimeMillis()+"_"+UUID.randomUUID().toString().substring(0,8)+".jpg");try(FileOutputStream out=new FileOutputStream(file)){out.write(bytes);out.flush();}return file.getAbsolutePath();}
     void confirmEdit(int id,String p,String date,double amt,boolean income){
         new AlertDialog.Builder(this).setMessage("Willst du den Eintrag bearbeiten?").setNegativeButton("Nein",null).setPositiveButton("Ja",(d,w)->new AlertDialog.Builder(this).setTitle("Eintrag bearbeiten").setItems(new String[]{"Bearbeiten","Löschen","Abbrechen"},(x,which)->{if(which==0)entryDialog(income,new int[]{id});else if(which==1)new AlertDialog.Builder(this).setMessage("Eintrag wirklich löschen?").setNegativeButton("Nein",null).setPositiveButton("Löschen",(a,b)->{db.deleteEntry(id);refresh();}).show();}).show()).show();
     }
@@ -285,8 +298,9 @@ public class MainActivity extends AppCompatActivity {
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
         if(request==REQ_GOOGLE_AUTH){android.util.Log.d("MeineFinanzen","Google Auth resultCode="+result+" data="+(data!=null));if(data!=null)handleGoogleAuthorizationResult(data);else showErrorDialog("Google-Anmeldung abgebrochen","Google hat kein Ergebnis an die App zurückgegeben. Rückgabecode: "+result);return;}
+        if(request==REQ_RECEIPT_CAMERA){if(result==RESULT_OK&&!activeReceiptPath.isEmpty()){File f=new File(activeReceiptPath);if(f.exists()&&f.length()>0){try{compressReceipt(f);if(receiptCameraButton!=null)receiptCameraButton.setText("🧾");toast("Quittung aufgenommen.");}catch(Exception ex){showErrorDialog("Quittung konnte nicht verarbeitet werden",ex.toString());}}else toast("Kein Quittungsfoto erhalten.");}else toast("Fotoaufnahme abgebrochen.");return;}
         if(result!=RESULT_OK||data==null)return;
-        try{Uri u=data.getData();if(request==REQ_CSV)writeCsv(u);else if(request==REQ_PDF)writePdf(u);else if(request==REQ_BACKUP)writeBackup(u);else if(request==REQ_RESTORE)readBackup(u);else if(request==REQ_CLOUD_FOLDER)saveCloudFolder(data);}
+        try{Uri u=data.getData();if(request==REQ_CSV)writeCsv(u);else if(request==REQ_PDF)writePdf(u);else if(request==REQ_BACKUP)writeBackup(u);else if(request==REQ_RESTORE)readBackup(u);else if(request==REQ_CLOUD_FOLDER)saveCloudFolder(data);else if(request==REQ_RECEIPT_PDF)writeReceiptPdf(u);}
         catch(Exception e){toast("Datei konnte nicht verarbeitet werden: "+e.getMessage());}
     }
     void writeCsv(Uri uri)throws Exception{try(Writer w=new OutputStreamWriter(getContentResolver().openOutputStream(uri),"UTF-8")){w.write("\uFEFFZweck;Datum;Betrag CHF;Art\n");for(String[]r:exportRows)w.write(csv(r[0])+";"+r[1]+";"+r[2].replace(".",",")+";"+r[3]+"\n");}toast("Excel-Datei gespeichert.");}
@@ -437,7 +451,7 @@ public class MainActivity extends AppCompatActivity {
         for(String a:db.accounts())aa.put(a);
         Cursor c=db.allEntries();
         while(c.moveToNext()){
-            org.json.JSONObject o=new org.json.JSONObject();o.put("account",c.getString(1));o.put("purpose",c.getString(2));o.put("date",c.getString(3));o.put("amount",c.getDouble(4));o.put("income",c.getInt(5)==1);ee.put(o);
+            org.json.JSONObject o=new org.json.JSONObject();o.put("account",c.getString(1));o.put("purpose",c.getString(2));o.put("date",c.getString(3));o.put("amount",c.getDouble(4));o.put("income",c.getInt(5)==1);String receiptPath=c.getString(6);if(receiptPath!=null&&!receiptPath.isEmpty()&&new File(receiptPath).exists())o.put("receipt_image",android.util.Base64.encodeToString(readFileBytes(receiptPath),android.util.Base64.NO_WRAP));ee.put(o);
         }
         c.close();org.json.JSONObject root=new org.json.JSONObject();root.put("accounts",aa);root.put("entries",ee);root.put("backup_version",1);root.put("created_at",System.currentTimeMillis());return root.toString(2);
     }
@@ -446,14 +460,14 @@ public class MainActivity extends AppCompatActivity {
         toast("Backup gespeichert.");
     }
     void readBackup(Uri uri)throws Exception{StringBuilder s=new StringBuilder();try(BufferedReader r=new BufferedReader(new InputStreamReader(getContentResolver().openInputStream(uri),"UTF-8"))){String line;while((line=r.readLine())!=null)s.append(line);}restoreBackupJson(s.toString());}
-    void restoreBackupJson(String json)throws Exception{org.json.JSONObject j=new org.json.JSONObject(json);org.json.JSONArray aa=j.getJSONArray("accounts"),ee=j.getJSONArray("entries");db.clearAll();for(int i=0;i<aa.length();i++)db.addAccount(aa.getString(i));for(int i=0;i<ee.length();i++){org.json.JSONObject o=ee.getJSONObject(i);int aid=db.accountId(o.getString("account"));if(aid>0)db.addEntry(aid,o.getString("purpose"),o.getString("date"),o.getDouble("amount"),o.getBoolean("income"));}ensureAccount();accountId=-1;reloadAccounts();refresh();toast("Backup wiederhergestellt.");}
+    void restoreBackupJson(String json)throws Exception{org.json.JSONObject j=new org.json.JSONObject(json);org.json.JSONArray aa=j.getJSONArray("accounts"),ee=j.getJSONArray("entries");db.clearAll();for(int i=0;i<aa.length();i++)db.addAccount(aa.getString(i));for(int i=0;i<ee.length();i++){org.json.JSONObject o=ee.getJSONObject(i);int aid=db.accountId(o.getString("account"));if(aid>0){String receiptPath="";String image=o.optString("receipt_image","");if(!image.isEmpty())receiptPath=restoreReceiptImage(image);db.addEntry(aid,o.optString("purpose",""),o.getString("date"),o.getDouble("amount"),o.getBoolean("income"),receiptPath);}}ensureAccount();accountId=-1;reloadAccounts();refresh();toast("Backup wiederhergestellt.");}
     void showErrorDialog(String title,String detail){TextView message=text(detail,14,DARK,false);message.setTextIsSelectable(true);message.setPadding(dp(16),dp(12),dp(16),dp(12));ScrollView scroll=new ScrollView(this);scroll.addView(message);new AlertDialog.Builder(this).setTitle(title).setView(scroll).setNeutralButton("Fehler kopieren",(d,w)->{android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);clipboard.setPrimaryClip(ClipData.newPlainText("Fehlermeldung",detail));toast("Fehlermeldung kopiert.");}).setPositiveButton("Schliessen",null).show();}
     void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
 
     static class DB extends SQLiteOpenHelper{
-        DB(Context c){super(c,"finanzen.db",null,1);}
-        public void onCreate(SQLiteDatabase d){d.execSQL("CREATE TABLE accounts(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE)");d.execSQL("CREATE TABLE entries(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER,purpose TEXT,date TEXT,amount REAL,income INTEGER)");}
-        public void onUpgrade(SQLiteDatabase d,int a,int b){}
+        DB(Context c){super(c,"finanzen.db",null,2);}
+        public void onCreate(SQLiteDatabase d){d.execSQL("CREATE TABLE accounts(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE)");d.execSQL("CREATE TABLE entries(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER,purpose TEXT,date TEXT,amount REAL,income INTEGER,receipt_path TEXT)");}
+        public void onUpgrade(SQLiteDatabase d,int a,int b){if(a<2)d.execSQL("ALTER TABLE entries ADD COLUMN receipt_path TEXT");}
         void addAccount(String n){getWritableDatabase().execSQL("INSERT OR IGNORE INTO accounts(name) VALUES(?)",new Object[]{n});}
         void renameAccount(int id,String n){getWritableDatabase().execSQL("UPDATE accounts SET name=? WHERE id=?",new Object[]{n,id});}
         void deleteAccount(int id){getWritableDatabase().execSQL("DELETE FROM entries WHERE account_id=?",new Object[]{id});getWritableDatabase().execSQL("DELETE FROM accounts WHERE id=?",new Object[]{id});}
@@ -463,11 +477,11 @@ public class MainActivity extends AppCompatActivity {
         String accountName(int id){try(Cursor c=getReadableDatabase().rawQuery("SELECT name FROM accounts WHERE id=?",new String[]{""+id})){return c.moveToFirst()?c.getString(0):"";}}
         int countAccounts(){try(Cursor c=getReadableDatabase().rawQuery("SELECT COUNT(*) FROM accounts",null)){return c.moveToFirst()?c.getInt(0):0;}}
         double accountBalance(int id){try(Cursor c=getReadableDatabase().rawQuery("SELECT COALESCE(SUM(CASE WHEN income=1 THEN amount ELSE -amount END),0) FROM entries WHERE account_id=?",new String[]{""+id})){return c.moveToFirst()?c.getDouble(0):0;}}
-        void addEntry(int id,String p,String date,double amount,boolean income){getWritableDatabase().execSQL("INSERT INTO entries(account_id,purpose,date,amount,income) VALUES(?,?,?,?,?)",new Object[]{id,p,date,amount,income?1:0});}
-        void updateEntry(int id,String p,String date,double amount,boolean income){getWritableDatabase().execSQL("UPDATE entries SET purpose=?,date=?,amount=?,income=? WHERE id=?",new Object[]{p,date,amount,income?1:0,id});}
+        void addEntry(int id,String p,String date,double amount,boolean income,String receipt){getWritableDatabase().execSQL("INSERT INTO entries(account_id,purpose,date,amount,income,receipt_path) VALUES(?,?,?,?,?,?)",new Object[]{id,p,date,amount,income?1:0,receipt});}
+        void updateEntry(int id,String p,String date,double amount,boolean income,String receipt){getWritableDatabase().execSQL("UPDATE entries SET purpose=?,date=?,amount=?,income=?,receipt_path=? WHERE id=?",new Object[]{p,date,amount,income?1:0,receipt,id});}
         void deleteEntry(int id){getWritableDatabase().execSQL("DELETE FROM entries WHERE id=?",new Object[]{id});}
-        Cursor one(int id){return getReadableDatabase().rawQuery("SELECT id,purpose,date,amount,income FROM entries WHERE id=?",new String[]{""+id});}
-        Cursor entries(int aid,int month,int year){String sql="SELECT id,purpose,date,amount,income FROM entries WHERE account_id=? AND substr(date,7,4)=?"+(month==0?"":" AND substr(date,4,2)=?")+" ORDER BY substr(date,7,4) DESC,substr(date,4,2) DESC,substr(date,1,2) DESC";return month==0?getReadableDatabase().rawQuery(sql,new String[]{""+aid,""+year}):getReadableDatabase().rawQuery(sql,new String[]{""+aid,""+year,String.format(Locale.US,"%02d",month)});}
-        Cursor allEntries(){return getReadableDatabase().rawQuery("SELECT e.id,a.name,e.purpose,e.date,e.amount,e.income FROM entries e JOIN accounts a ON a.id=e.account_id",null);}
+        Cursor one(int id){return getReadableDatabase().rawQuery("SELECT id,purpose,date,amount,income,receipt_path FROM entries WHERE id=?",new String[]{""+id});}
+        Cursor entries(int aid,int month,int year){String sql="SELECT id,purpose,date,amount,income,receipt_path FROM entries WHERE account_id=? AND substr(date,7,4)=?"+(month==0?"":" AND substr(date,4,2)=?")+" ORDER BY substr(date,7,4) DESC,substr(date,4,2) DESC,substr(date,1,2) DESC";return month==0?getReadableDatabase().rawQuery(sql,new String[]{""+aid,""+year}):getReadableDatabase().rawQuery(sql,new String[]{""+aid,""+year,String.format(Locale.US,"%02d",month)});}
+        Cursor allEntries(){return getReadableDatabase().rawQuery("SELECT e.id,a.name,e.purpose,e.date,e.amount,e.income,e.receipt_path FROM entries e JOIN accounts a ON a.id=e.account_id",null);}
     }
 }
