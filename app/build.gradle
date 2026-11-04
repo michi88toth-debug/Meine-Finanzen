@@ -35,6 +35,12 @@ android {
                 signingConfig signingConfigs.stable
             }
         }
+        release {
+            if (hasStableSigning) {
+                signingConfig signingConfigs.stable
+            }
+            minifyEnabled false
+        }
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
