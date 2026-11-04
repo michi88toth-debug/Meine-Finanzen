@@ -28,9 +28,19 @@ jobs:
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > app/stable-signing.jks
       - name: Show Android signing fingerprints
         run: gradle :app:signingReport
-      - name: Build debug APK
-        run: gradle assembleDebug
+      - name: Verify release signing key
+        run: |
+          if [ ! -f app/stable-signing.jks ]; then
+            echo "Stable signing key is missing. Release APK must not be built unsigned."
+            exit 1
+          fi
+      - name: Build debug and release APKs
+        run: gradle assembleDebug assembleRelease
       - uses: actions/upload-artifact@v4
         with:
           name: meine-finanzen-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: finanztracker-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
