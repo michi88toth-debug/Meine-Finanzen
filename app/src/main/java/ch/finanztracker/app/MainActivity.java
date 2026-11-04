@@ -114,7 +114,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                     runOnUiThread(()->toast("Backup erfolgreich in Google Drive gespeichert."));
                 }
-            }catch(Exception e){android.util.Log.e("MeineFinanzen","Google-Drive-Backup fehlgeschlagen",e);runOnUiThread(()->toast("Google-Drive-Backup fehlgeschlagen."));}
+            }catch(Exception e){android.util.Log.e("MeineFinanzen","Google-Drive-Backup fehlgeschlagen",e);String detail=e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();if(detail.length()>180)detail=detail.substring(0,180);final String errorDetail=detail;runOnUiThread(()->toast("Drive-Fehler: "+errorDetail));}
         });
     }
     @Override protected void onStop(){super.onStop();needsUnlockOnResume=true;saveAutomaticBackup();}
