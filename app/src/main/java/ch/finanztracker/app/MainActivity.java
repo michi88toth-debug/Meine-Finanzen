@@ -345,25 +345,18 @@ public class MainActivity extends AppCompatActivity {
     }
     void toggleBiometric(){
         boolean enabled=getPreferences(0).getBoolean("bio_on",false);
-        if(enabled){getPreferences(0).edit().putBoolean("bio_on",false).apply();toast("Fingerabdruck-Anmeldung deaktiviert.");return;}
+        if(enabled){
+            getPreferences(0).edit().putBoolean("bio_on",false).apply();
+            toast("Fingerabdruck-Anmeldung deaktiviert.");
+            return;
+        }
         BiometricManager manager=BiometricManager.from(this);
-        if(manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)!=BiometricManager.BIOMETRIC_SUCCESS){toast("Auf diesem Gerät ist kein verwendbarer Fingerabdruck eingerichtet.");return;}
-        String savedPin=getPreferences(0).getString("pin","");
-        if(savedPin.isEmpty()){setBiometricPin();return;}
-        EditText e=new EditText(this);e.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);e.setHint("Vorhandene PIN bestätigen");
-        new AlertDialog.Builder(this).setTitle("Fingerabdruck aktivieren").setMessage("Bitte bestätige deine PIN. Die PIN-Abfrage beim App-Start bleibt davon unabhängig.").setView(e)
-            .setNegativeButton("Abbrechen",null).setPositiveButton("Bestätigen",(d,w)->{
-                if(!e.getText().toString().equals(getPreferences(0).getString("pin",""))){toast("PIN ist nicht korrekt.");return;}
-                getPreferences(0).edit().putBoolean("bio_on",true).apply();toast("Fingerabdruck-Anmeldung aktiviert.");
-            }).show();
-    }
-    void setBiometricPin(){
-        EditText e=new EditText(this);e.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);e.setHint("PIN (mind. 4 Ziffern)");
-        new AlertDialog.Builder(this).setTitle("PIN für Fingerabdruck festlegen").setMessage("Diese PIN dient als Ersatz, falls der Fingerabdruck nicht funktioniert. Die PIN-Abfrage beim App-Start wird nicht aktiviert.").setView(e)
-            .setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{
-                String p=e.getText().toString();if(p.length()<4){toast("PIN muss mindestens 4 Ziffern haben.");return;}
-                getPreferences(0).edit().putString("pin",p).putBoolean("bio_on",true).apply();toast("Fingerabdruck-Anmeldung aktiviert.");
-            }).show();
+        if(manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)!=BiometricManager.BIOMETRIC_SUCCESS){
+            toast("Auf diesem Gerät ist kein verwendbarer Fingerabdruck eingerichtet.");
+            return;
+        }
+        getPreferences(0).edit().putBoolean("bio_on",true).apply();
+        toast("Fingerabdruck-Anmeldung aktiviert.");
     }
     void checkPin(){
         boolean pinOn=getPreferences(0).getBoolean("pin_on",false);
