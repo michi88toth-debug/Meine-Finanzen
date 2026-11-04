@@ -17,6 +17,13 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.biometric.BiometricManager;
 import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
+import com.google.android.gms.auth.api.identity.AuthorizationRequest;
+import com.google.android.gms.auth.api.identity.AuthorizationResult;
+import com.google.android.gms.auth.api.identity.Identity;
+import com.google.android.gms.common.api.Scope;
+import java.net.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.io.*;
 import java.text.*;
 import java.util.*;
@@ -30,8 +37,13 @@ public class MainActivity extends AppCompatActivity {
     final int REQ_CSV=11, REQ_PDF=12, REQ_BACKUP=13, REQ_RESTORE=14, REQ_CLOUD_FOLDER=15;
     ArrayList<String[]> exportRows=new ArrayList<>();
     String pendingCloudProvider="";
+    static final int REQ_GOOGLE_AUTH=16;
+    static final String DRIVE_SCOPE="https://www.googleapis.com/auth/drive.file";
+    String googleAccessToken=null;
+    long googleTokenValidUntil=0;
+    final ExecutorService cloudExecutor=Executors.newSingleThreadExecutor();
 
-    @Override public void onCreate(Bundle b){super.onCreate(b); getWindow().setStatusBarColor(0xFF126B43); getWindow().setNavigationBarColor(0xFFFFFFFF); getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR); db=new DB(this); ensureAccount(); buildUI(); checkPin();}
+    @Override public void onCreate(Bundle b){super.onCreate(b); getWindow().setStatusBarColor(0xFF126B43); getWindow().setNavigationBarColor(0xFFFFFFFF); getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR); db=new DB(this); ensureAccount(); buildUI(); checkPin(); trySilentGoogleAuthorization();}
     @Override protected void onStop(){super.onStop();saveAutomaticBackup();}
     int dp(float v){return (int)(v*getResources().getDisplayMetrics().density+.5f);}
     TextView text(String s,int size,int color,boolean bold){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);if(bold)t.setTypeface(null,1);return t;}
