@@ -9,7 +9,6 @@ import android.graphics.*;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.pdf.PdfDocument;
 import android.net.Uri;
-import android.provider.DocumentsContract;
 import android.text.InputType;
 import android.view.*;
 import android.widget.*;
@@ -17,10 +16,6 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.biometric.BiometricManager;
 import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
-import com.google.android.gms.auth.api.identity.AuthorizationRequest;
-import com.google.android.gms.auth.api.identity.AuthorizationResult;
-import com.google.android.gms.auth.api.identity.Identity;
-import com.google.android.gms.common.api.Scope;
 import java.net.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,175 +29,14 @@ public class MainActivity extends AppCompatActivity {
     TextView expenses, incomes, balance; ArrayList<String> accounts=new ArrayList<>(); int accountId=-1;
     String[] months={"Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember","Ganzes Jahr"};
     int selectedMonth=Calendar.getInstance().get(Calendar.MONTH)+1, selectedYear=Calendar.getInstance().get(Calendar.YEAR);
-    final int REQ_CSV=11, REQ_PDF=12, REQ_BACKUP=13, REQ_RESTORE=14, REQ_CLOUD_FOLDER=15, REQ_RECEIPT_CAMERA=17, REQ_RECEIPT_PDF=18;
+    final int REQ_CSV=11, REQ_PDF=12, REQ_BACKUP=13, REQ_RESTORE=14, REQ_GOOGLE_DRIVE_SETUP=15, REQ_RECEIPT_CAMERA=17, REQ_RECEIPT_PDF=18, REQ_GOOGLE_DRIVE_RESTORE=19;
     ArrayList<String[]> exportRows=new ArrayList<>();
-    String pendingCloudProvider="";
-    static final int REQ_GOOGLE_AUTH=16;
-    static final String DRIVE_SCOPE="https://www.googleapis.com/auth/drive.file";
-    String googleAccessToken=null;
-    long googleTokenValidUntil=0;
-    boolean googleAuthorizationInProgress=false;
-    boolean pendingGoogleRestore=false;
     boolean needsUnlockOnResume=false;
     final ExecutorService cloudExecutor=Executors.newSingleThreadExecutor();
     String activeReceiptPath=""; String pendingReceiptCapturePath=""; String pendingReceiptPdfPath=""; TextView receiptCameraButton;
 
-    @Override public void onCreate(Bundle b){super.onCreate(b); getWindow().setStatusBarColor(0xFF126B43); getWindow().setNavigationBarColor(0xFFFFFFFF); getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR); db=new DB(this); ensureAccount(); buildUI(); checkPin(); trySilentGoogleAuthorization();}
+    @Override public void onCreate(Bundle b){super.onCreate(b); getWindow().setStatusBarColor(0xFF126B43); getWindow().setNavigationBarColor(0xFFFFFFFF); getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR); db=new DB(this); ensureAccount(); buildUI(); checkPin();}
 
-    void trySilentGoogleAuthorization(){
-        if("Google Drive".equals(getPreferences(0).getString("cloud_provider","")))authorizeGoogleDrive(false);
-    }
-    void authorizeGoogleDrive(boolean userInitiated){
-        if(googleAuthorizationInProgress)return;
-        googleAuthorizationInProgress=true;
-        AuthorizationRequest request=AuthorizationRequest.builder().setRequestedScopes(Arrays.asList(new Scope(DRIVE_SCOPE))).build();
-        Identity.getAuthorizationClient(this).authorize(request).addOnSuccessListener(result->{
-            googleAuthorizationInProgress=false;
-            if(result.hasResolution()){
-                if(userInitiated){
-                    try{startIntentSenderForResult(result.getPendingIntent().getIntentSender(),REQ_GOOGLE_AUTH,null,0,0,0);}
-                    catch(android.content.IntentSender.SendIntentException e){toast("Google-Anmeldung konnte nicht gestartet werden.");}
-                }
-            }else{
-                googleAccessToken=result.getAccessToken();
-                googleTokenValidUntil=System.currentTimeMillis()+50L*60L*1000L;
-                onGoogleDriveAuthorized();
-            }
-        }).addOnFailureListener(e->{googleAuthorizationInProgress=false;android.util.Log.e("MeineFinanzen","Google-Drive-Autorisierung fehlgeschlagen",e);if(userInitiated)toast("Google-Anmeldung fehlgeschlagen: "+e.getMessage());});
-    }
-    void handleGoogleAuthorizationResult(Intent data){
-        googleAuthorizationInProgress=false;
-        try{
-            AuthorizationResult result=Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(data);
-            googleAccessToken=result.getAccessToken();
-            googleTokenValidUntil=System.currentTimeMillis()+50L*60L*1000L;
-            toast("Google Drive wurde verbunden.");
-            onGoogleDriveAuthorized();
-        }catch(Exception e){android.util.Log.e("MeineFinanzen","Google-Autorisierung fehlgeschlagen",e);String detail=e.toString();for(Throwable cause=e.getCause();cause!=null;cause=cause.getCause())detail+="\nUrsache: "+cause;showErrorDialog("Google-Autorisierung fehlgeschlagen",detail);}
-    }
-    void onGoogleDriveAuthorized(){
-        getPreferences(0).edit().putString("cloud_provider","Google Drive").remove("cloud_tree_uri").apply();
-        if(pendingGoogleRestore){pendingGoogleRestore=false;downloadGoogleDriveBackup();}
-        else uploadGoogleDriveBackup();
-    }
-    void restoreGoogleDriveBackup(){
-        pendingGoogleRestore=true;
-        if(googleAccessToken!=null&&System.currentTimeMillis()<googleTokenValidUntil){pendingGoogleRestore=false;downloadGoogleDriveBackup();}
-        else authorizeGoogleDrive(true);
-    }
-    String findOrCreateGoogleDriveFolder(okhttp3.OkHttpClient client,String token)throws Exception{
-        String query=java.net.URLEncoder.encode("name = 'MeineFinanzen' and mimeType = 'application/vnd.google-apps.folder' and trashed = false","UTF-8");
-        okhttp3.Request find=new okhttp3.Request.Builder().url("https://www.googleapis.com/drive/v3/files?q="+query+"&spaces=drive&pageSize=10&fields=files(id)").header("Authorization","Bearer "+token).get().build();
-        try(okhttp3.Response response=client.newCall(find).execute()){
-            String body=response.body()==null?"":response.body().string();
-            if(!response.isSuccessful())throw new IOException("Google Drive Ordnersuche HTTP "+response.code()+": "+body);
-            org.json.JSONArray folders=new org.json.JSONObject(body).optJSONArray("files");
-            if(folders!=null&&folders.length()>0)return folders.getJSONObject(0).getString("id");
-        }
-        org.json.JSONObject metadata=new org.json.JSONObject();metadata.put("name","MeineFinanzen");metadata.put("mimeType","application/vnd.google-apps.folder");
-        okhttp3.Request create=new okhttp3.Request.Builder().url("https://www.googleapis.com/drive/v3/files?fields=id").header("Authorization","Bearer "+token).post(okhttp3.RequestBody.create(metadata.toString(),okhttp3.MediaType.parse("application/json; charset=utf-8"))).build();
-        try(okhttp3.Response response=client.newCall(create).execute()){
-            String body=response.body()==null?"":response.body().string();
-            if(!response.isSuccessful())throw new IOException("Google Drive Ordner konnte nicht erstellt werden HTTP "+response.code()+": "+body);
-            String id=new org.json.JSONObject(body).optString("id","");
-            if(id.isEmpty())throw new IOException("Google Drive hat keine Ordner-ID zurückgegeben.");
-            return id;
-        }
-    }
-    void downloadGoogleDriveBackup(){
-        if(googleAccessToken==null||googleAccessToken.isEmpty()){toast("Bitte zuerst Google Drive verbinden.");return;}
-        final String token=googleAccessToken;
-        cloudExecutor.execute(()->{
-            try{
-                okhttp3.OkHttpClient client=new okhttp3.OkHttpClient();
-                String folderId=findOrCreateGoogleDriveFolder(client,token);
-                String query=java.net.URLEncoder.encode("name = 'Meine-Finanzen-Backup.json' and '"+folderId+"' in parents and trashed = false","UTF-8");
-                okhttp3.Request listRequest=new okhttp3.Request.Builder()
-                    .url("https://www.googleapis.com/drive/v3/files?q="+query+"&spaces=drive&orderBy=modifiedTime%20desc&pageSize=10&fields=files(id,name,modifiedTime)")
-                    .header("Authorization","Bearer "+token).get().build();
-                String fileId=null;
-                try(okhttp3.Response response=client.newCall(listRequest).execute()){
-                    String body=response.body()==null?"":response.body().string();
-                    if(!response.isSuccessful())throw new IOException("Google Drive Suche HTTP "+response.code()+": "+body);
-                    org.json.JSONArray files=new org.json.JSONObject(body).optJSONArray("files");
-                    if(files!=null&&files.length()>0)fileId=files.getJSONObject(0).optString("id",null);
-                }
-                if(fileId==null||fileId.isEmpty())throw new IOException("Im Google-Drive-Ordner MeineFinanzen wurde kein Backup namens Meine-Finanzen-Backup.json gefunden.");
-                okhttp3.Request getRequest=new okhttp3.Request.Builder()
-                    .url("https://www.googleapis.com/drive/v3/files/"+fileId+"?alt=media")
-                    .header("Authorization","Bearer "+token).get().build();
-                final String backup;
-                try(okhttp3.Response response=client.newCall(getRequest).execute()){
-                    backup=response.body()==null?"":response.body().string();
-                    if(!response.isSuccessful())throw new IOException("Google Drive Download HTTP "+response.code()+": "+backup);
-                }
-                runOnUiThread(()->confirmCloudRestore(backup));
-            }catch(Exception e){android.util.Log.e("MeineFinanzen","Google-Drive-Wiederherstellung fehlgeschlagen",e);String detail=e.toString();for(Throwable cause=e.getCause();cause!=null;cause=cause.getCause())detail+="\nUrsache: "+cause;final String error=detail;runOnUiThread(()->showErrorDialog("Google-Drive-Import fehlgeschlagen",error));}
-        });
-    }
-    void confirmCloudRestore(String json){
-        try{
-            org.json.JSONObject backup=new org.json.JSONObject(json);
-            backup.getJSONArray("accounts");backup.getJSONArray("entries");
-            new AlertDialog.Builder(this).setTitle("Cloud-Backup wiederherstellen")
-                .setMessage("Das Backup wurde in Google Drive gefunden. Wenn du fortfährst, werden die aktuell gespeicherten Konten und Einträge durch den Stand aus der Cloud ersetzt.")
-                .setNegativeButton("Abbrechen",null)
-                .setPositiveButton("Wiederherstellen",(d,w)->{try{restoreBackupJson(json);}catch(Exception e){showErrorDialog("Backup konnte nicht wiederhergestellt werden",e.toString());}}).show();
-        }catch(Exception e){showErrorDialog("Ungültiges Cloud-Backup","Die gefundene Datei ist kein gültiges Meine-Finanzen-Backup.\n"+e.getMessage());}
-    }
-    void uploadGoogleDriveBackup(){
-        if(googleAccessToken==null||googleAccessToken.isEmpty())return;
-        final String token=googleAccessToken;
-        final String json;
-        try{json=backupJson();}catch(Exception e){android.util.Log.e("MeineFinanzen","Backup konnte nicht erstellt werden",e);return;}
-        cloudExecutor.execute(()->{
-            try{
-                okhttp3.OkHttpClient client=new okhttp3.OkHttpClient();
-                String folderId=findOrCreateGoogleDriveFolder(client,token);
-                String fileQuery=java.net.URLEncoder.encode("name = 'Meine-Finanzen-Backup.json' and '"+folderId+"' in parents and trashed = false","UTF-8");
-                okhttp3.Request findFile=new okhttp3.Request.Builder().url("https://www.googleapis.com/drive/v3/files?q="+fileQuery+"&spaces=drive&pageSize=10&fields=files(id)").header("Authorization","Bearer "+token).get().build();
-                String fileId=null;
-                try(okhttp3.Response response=client.newCall(findFile).execute()){
-                    String responseText=response.body()==null?"":response.body().string();
-                    if(!response.isSuccessful())throw new IOException("Google Drive Suche HTTP "+response.code()+": "+responseText);
-                    org.json.JSONArray files=new org.json.JSONObject(responseText).optJSONArray("files");
-                    if(files!=null&&files.length()>0)fileId=files.getJSONObject(0).optString("id",null);
-                }
-                okhttp3.MediaType media=okhttp3.MediaType.parse("application/json; charset=utf-8");
-                okhttp3.RequestBody body=okhttp3.RequestBody.create(json,media);
-                okhttp3.Request request;
-                if(fileId==null||fileId.isEmpty()){
-                    org.json.JSONObject metadataJson=new org.json.JSONObject();metadataJson.put("name","Meine-Finanzen-Backup.json");metadataJson.put("parents",new org.json.JSONArray().put(folderId));
-                    okhttp3.RequestBody metadata=okhttp3.RequestBody.create(metadataJson.toString(),media);
-                    okhttp3.RequestBody multipart=new okhttp3.MultipartBody.Builder()
-                        .setType(okhttp3.MediaType.parse("multipart/related"))
-                        .addPart(metadata)
-                        .addPart(body).build();
-                    request=new okhttp3.Request.Builder().url("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id")
-                        .header("Authorization","Bearer "+token).post(multipart).build();
-                }else{
-                    request=new okhttp3.Request.Builder().url("https://www.googleapis.com/upload/drive/v3/files/"+fileId+"?uploadType=media")
-                        .header("Authorization","Bearer "+token).patch(body).build();
-                }
-                try(okhttp3.Response response=client.newCall(request).execute()){
-                    String responseText=response.body()==null?"":response.body().string();
-                    if(!response.isSuccessful())throw new IOException("Google Drive HTTP "+response.code()+": "+responseText);
-                    String savedId=fileId;
-                    if(savedId==null||savedId.isEmpty()){
-                        String newId=new org.json.JSONObject(responseText).optString("id","");
-                        if(newId.isEmpty())throw new IOException("Keine Datei-ID erhalten.");
-                        getPreferences(0).edit().putString("google_drive_file_id",newId).apply();
-                    }else getPreferences(0).edit().putString("google_drive_file_id",savedId).apply();
-                    String fingerprint=backupFingerprint(json);
-                    getPreferences(0).edit().putString("google_drive_backup_fingerprint",fingerprint).apply();
-                    runOnUiThread(()->toast("Backup erfolgreich in Google Drive gespeichert."));
-                }
-            }catch(Exception e){
-                android.util.Log.e("MeineFinanzen","Google-Drive-Backup fehlgeschlagen",e);
-                runOnUiThread(()->toast("Google-Drive-Backup nicht möglich. Bitte Internetverbindung prüfen; es wird später erneut versucht."));
-            }
-        });
-    }
     @Override protected void onStop(){super.onStop();needsUnlockOnResume=true;saveAutomaticBackup();}
     @Override protected void onResume(){super.onResume();updatePeriodToCurrent();if(needsUnlockOnResume){needsUnlockOnResume=false;checkPin();}}
     void updatePeriodToCurrent(){
@@ -302,10 +136,9 @@ public class MainActivity extends AppCompatActivity {
     void exportDialog(){new AlertDialog.Builder(this).setTitle("Exportformat wählen").setItems(new String[]{"PDF (A4)","Excel (CSV)"},(d,w)->{exportRows.clear();Cursor c=db.entries(accountId,selectedMonth,selectedYear);while(c.moveToNext())exportRows.add(new String[]{(c.getString(1)==null||c.getString(1).trim().isEmpty())?"Ohne Zweck":c.getString(1),c.getString(2)+" "+(c.getString(6)==null?"00:00":c.getString(6)),String.format(Locale.US,"%.2f",c.getDouble(3)),c.getInt(4)==1?"Einnahme":"Ausgabe"});c.close();Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType(w==0?"application/pdf":"text/csv");i.putExtra(Intent.EXTRA_TITLE,w==0?"Meine-Finanzen.pdf":"Meine-Finanzen.csv");startActivityForResult(i,w==0?REQ_PDF:REQ_CSV);}).show();}
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
-        if(request==REQ_GOOGLE_AUTH){android.util.Log.d("MeineFinanzen","Google Auth resultCode="+result+" data="+(data!=null));if(data!=null)handleGoogleAuthorizationResult(data);else showErrorDialog("Google-Anmeldung abgebrochen","Google hat kein Ergebnis an die App zurückgegeben. Rückgabecode: "+result);return;}
         if(request==REQ_RECEIPT_CAMERA){if(result==RESULT_OK&&!pendingReceiptCapturePath.isEmpty()){File f=new File(pendingReceiptCapturePath);if(f.exists()&&f.length()>0){try{compressReceipt(f);activeReceiptPath=pendingReceiptCapturePath;if(receiptCameraButton!=null)receiptCameraButton.setText("🧾");toast("Quittung aufgenommen.");}catch(Exception ex){showErrorDialog("Quittung konnte nicht verarbeitet werden",ex.toString());}}else toast("Kein Quittungsfoto erhalten.");}else toast("Fotoaufnahme abgebrochen.");pendingReceiptCapturePath="";return;}
         if(result!=RESULT_OK||data==null)return;
-        try{Uri u=data.getData();if(request==REQ_CSV)writeCsv(u);else if(request==REQ_PDF)writePdf(u);else if(request==REQ_BACKUP)writeBackup(u);else if(request==REQ_RESTORE)readBackup(u);else if(request==REQ_CLOUD_FOLDER)saveCloudFolder(data);else if(request==REQ_RECEIPT_PDF)writeReceiptPdf(u);}
+        try{Uri u=data.getData();if(request==REQ_CSV)writeCsv(u);else if(request==REQ_PDF)writePdf(u);else if(request==REQ_BACKUP)writeBackup(u);else if(request==REQ_RESTORE)readBackup(u);else if(request==REQ_GOOGLE_DRIVE_SETUP)saveGoogleDriveBackupFile(data);else if(request==REQ_GOOGLE_DRIVE_RESTORE)restoreGoogleDriveBackupFile(data);else if(request==REQ_RECEIPT_PDF)writeReceiptPdf(u);}
         catch(Exception e){toast("Datei konnte nicht verarbeitet werden: "+e.getMessage());}
     }
     void writeCsv(Uri uri)throws Exception{try(Writer w=new OutputStreamWriter(getContentResolver().openOutputStream(uri),"UTF-8")){w.write("\uFEFFZweck;Datum / Uhrzeit;Betrag CHF;Art\n");for(String[]r:exportRows)w.write(csv(r[0])+";"+r[1]+";"+r[2].replace(".",",")+";"+r[3]+"\n");}toast("Excel-Datei gespeichert.");}
@@ -386,52 +219,82 @@ public class MainActivity extends AppCompatActivity {
             .setNegativeButton("Beenden",(d,w)->finish()).show();
     }
     void backupDialog(){
-        boolean cloud=getPreferences(0).contains("cloud_tree_uri")||"Google Drive".equals(getPreferences(0).getString("cloud_provider",""));
-        String provider=getPreferences(0).getString("cloud_provider","");
-        String cloudLabel=provider.isEmpty()?"Cloud-Backup":("Cloud-Backup ("+provider+")");
-        String[] opts={"Backup auf Gerät speichern","Backup importieren / wiederherstellen","Backup aus Google Drive importieren",cloud?cloudLabel+" ändern":"Cloud-Backup einrichten","Cloud-Backup deaktivieren"};
+        boolean connected=getPreferences(0).getString("google_drive_backup_uri",null)!=null;
+        String[] opts={"Backup auf Gerät speichern","Backup importieren / wiederherstellen","Google Drive-Backup einrichten / ändern","Google Drive-Backup wiederherstellen","Google Drive-Backup deaktivieren"};
         new AlertDialog.Builder(this).setTitle("Datensicherung").setItems(opts,(d,w)->{
             if(w==0){Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");i.putExtra(Intent.EXTRA_TITLE,"Meine-Finanzen-Backup.json");startActivityForResult(i,REQ_BACKUP);}
             else if(w==1){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");startActivityForResult(i,REQ_RESTORE);}
-            else if(w==2)restoreGoogleDriveBackup();
-            else if(w==3)chooseCloudProvider();
-            else if(w==4){getPreferences(0).edit().remove("cloud_tree_uri").remove("cloud_provider").remove("google_drive_file_id").apply();googleAccessToken=null;googleTokenValidUntil=0;toast("Cloud-Backup deaktiviert. Die lokale automatische Sicherung bleibt aktiv.");}
+            else if(w==2)chooseGoogleDriveBackupFile();
+            else if(w==3){
+                String saved=getPreferences(0).getString("google_drive_backup_uri",null);
+                if(saved!=null){try{readBackup(Uri.parse(saved));}catch(Exception e){showErrorDialog("Google-Drive-Backup konnte nicht gelesen werden",e.toString());}}
+                else chooseGoogleDriveBackupForRestore();
+            }else if(w==4){
+                String saved=getPreferences(0).getString("google_drive_backup_uri",null);
+                if(saved!=null){try{getContentResolver().releasePersistableUriPermission(Uri.parse(saved),Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);}catch(Exception ignored){}}
+                getPreferences(0).edit().remove("google_drive_backup_uri").remove("google_drive_backup_fingerprint").apply();
+                toast("Google-Drive-Backup-Verbindung entfernt. Die lokale automatische Sicherung bleibt aktiv.");
+            }
         }).show();
     }
-    void chooseCloudProvider(){
-        authorizeGoogleDrive(true);
+    void chooseGoogleDriveBackupFile(){
+        Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("application/json");
+        i.putExtra(Intent.EXTRA_TITLE,"Meine-Finanzen-Backup.json");
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(i,REQ_GOOGLE_DRIVE_SETUP);
     }
-    void saveCloudFolder(Intent data){
-        Uri tree=data.getData();if(tree==null)return;
+    void chooseGoogleDriveBackupForRestore(){
+        Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("application/json");
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(i,REQ_GOOGLE_DRIVE_RESTORE);
+    }
+    void keepBackupUriPermission(Uri uri,Intent data)throws Exception{
         int flags=data.getFlags()&(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-        try{getContentResolver().takePersistableUriPermission(tree,flags);}catch(Exception ignored){}
-        android.content.SharedPreferences.Editor pref=getPreferences(0).edit().putString("cloud_tree_uri",tree.toString());
-        if(!pendingCloudProvider.isEmpty())pref.putString("cloud_provider",pendingCloudProvider);
-        pref.apply();
-        String provider=pendingCloudProvider.isEmpty()?"Cloud":pendingCloudProvider;
-        pendingCloudProvider="";
-        saveAutomaticBackup();
-        toast(provider+"-Ordner eingerichtet. Die Sicherung wird ab jetzt automatisch aktualisiert.");
+        if((data.getFlags()&Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)==0)
+            throw new IOException("Der Speicheranbieter hat keinen dauerhaft speicherbaren Dateizugriff angeboten. Bitte Google Drive im Dateiauswahldialog auswählen und erneut versuchen.");
+        getContentResolver().takePersistableUriPermission(uri,flags);
+    }
+    void saveGoogleDriveBackupFile(Intent data){
+        Uri uri=data.getData();if(uri==null)return;
+        try{
+            keepBackupUriPermission(uri,data);
+            getPreferences(0).edit().putString("google_drive_backup_uri",uri.toString()).remove("google_drive_backup_fingerprint").apply();
+            String json=backupJson();
+            writeGoogleDriveBackup(uri,json);
+            getPreferences(0).edit().putString("google_drive_backup_fingerprint",backupFingerprint(json)).apply();
+            toast("Google Drive verbunden. Das automatische Backup ist eingerichtet.");
+        }catch(Exception e){showErrorDialog("Google-Drive-Backup konnte nicht eingerichtet werden",e.toString());}
+    }
+    void restoreGoogleDriveBackupFile(Intent data){
+        Uri uri=data.getData();if(uri==null)return;
+        try{
+            keepBackupUriPermission(uri,data);
+            getPreferences(0).edit().putString("google_drive_backup_uri",uri.toString()).remove("google_drive_backup_fingerprint").apply();
+            readBackup(uri);
+            String json=backupJson();
+            getPreferences(0).edit().putString("google_drive_backup_fingerprint",backupFingerprint(json)).apply();
+            toast("Google-Drive-Backup übernommen. Künftige Sicherungen erfolgen automatisch.");
+        }catch(Exception e){showErrorDialog("Google-Drive-Backup konnte nicht wiederhergestellt werden",e.toString());}
     }
     void saveAutomaticBackup(){
         try{
-            String provider=getPreferences(0).getString("cloud_provider","");
             String json=backupJson();
             File local=new File(getFilesDir(),"Meine-Finanzen-Backup.json");
             try(Writer w=new OutputStreamWriter(new FileOutputStream(local),"UTF-8")){w.write(json);}
-            String saved=getPreferences(0).getString("cloud_tree_uri",null);
-            if(saved!=null)writeTreeBackup(Uri.parse(saved),json);
-            // Google Drive nur synchronisieren, wenn sich Konten oder Buchungen geändert haben.
-            // Das verhindert unnötige Netzwerkanfragen beim Öffnen/Schliessen des Android-Dateiauswahldialogs.
-            if("Google Drive".equals(provider)){
+            String saved=getPreferences(0).getString("google_drive_backup_uri",null);
+            if(saved!=null){
                 String fingerprint=backupFingerprint(json);
                 String lastFingerprint=getPreferences(0).getString("google_drive_backup_fingerprint","");
                 if(!fingerprint.equals(lastFingerprint)){
-                    if(googleAccessToken!=null&&System.currentTimeMillis()<googleTokenValidUntil)uploadGoogleDriveBackup();
-                    else authorizeGoogleDrive(false);
+                    writeGoogleDriveBackup(Uri.parse(saved),json);
+                    getPreferences(0).edit().putString("google_drive_backup_fingerprint",fingerprint).apply();
                 }
             }
-        }catch(Exception e){android.util.Log.e("MeineFinanzen","Automatisches Backup fehlgeschlagen",e);}
+        }catch(Exception e){android.util.Log.e("MeineFinanzen","Automatisches Backup fehlgeschlagen",e);toast("Automatisches Backup fehlgeschlagen. Bitte Google-Drive-Verbindung prüfen.");}
     }
     String backupFingerprint(String json)throws Exception{
         org.json.JSONObject data=new org.json.JSONObject(json);
@@ -439,22 +302,12 @@ public class MainActivity extends AppCompatActivity {
         byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(data.toString().getBytes("UTF-8"));
         return android.util.Base64.encodeToString(digest,android.util.Base64.NO_WRAP);
     }
-    void writeTreeBackup(Uri tree,String json)throws Exception{
-        String folderName="MeineFinanzen",fileName="Meine-Finanzen-Backup.json";Uri folderUri=null;
-        String rootId=DocumentsContract.getTreeDocumentId(tree);
-        Uri rootChildren=DocumentsContract.buildChildDocumentsUriUsingTree(tree,rootId);
-        try(Cursor c=getContentResolver().query(rootChildren,new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME},null,null,null)){
-            if(c!=null)while(c.moveToNext())if(folderName.equals(c.getString(1))){folderUri=DocumentsContract.buildDocumentUriUsingTree(tree,c.getString(0));break;}
+    void writeGoogleDriveBackup(Uri uri,String json)throws Exception{
+        try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){
+            if(out==null)throw new IOException("Google Drive hat die Backup-Datei nicht zum Schreiben geöffnet.");
+            out.write(json.getBytes("UTF-8"));
+            out.flush();
         }
-        if(folderUri==null)folderUri=DocumentsContract.createDocument(getContentResolver(),tree,DocumentsContract.Document.MIME_TYPE_DIR,folderName);
-        if(folderUri==null)throw new IOException("Der Cloud-Ordner MeineFinanzen konnte nicht erstellt werden.");
-        String folderId=DocumentsContract.getDocumentId(folderUri);Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(tree,folderId);Uri fileUri=null;
-        try(Cursor c=getContentResolver().query(children,new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME},null,null,null)){
-            if(c!=null)while(c.moveToNext())if(fileName.equals(c.getString(1))){fileUri=DocumentsContract.buildDocumentUriUsingTree(tree,c.getString(0));break;}
-        }
-        if(fileUri==null)fileUri=DocumentsContract.createDocument(getContentResolver(),folderUri,"application/json",fileName);
-        if(fileUri==null)throw new IOException("Backup-Datei konnte im Ordner MeineFinanzen nicht erstellt werden.");
-        try(OutputStream out=getContentResolver().openOutputStream(fileUri,"wt")){if(out==null)throw new IOException("Cloud-Datei ist nicht beschreibbar.");out.write(json.getBytes("UTF-8"));out.flush();}
     }
     String backupJson()throws Exception{
         org.json.JSONArray aa=new org.json.JSONArray(),ee=new org.json.JSONArray();
