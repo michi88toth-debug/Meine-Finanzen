@@ -41,6 +41,7 @@ public class MainActivity extends AppCompatActivity {
     static final String DRIVE_SCOPE="https://www.googleapis.com/auth/drive.file";
     String googleAccessToken=null;
     long googleTokenValidUntil=0;
+    boolean googleAuthorizationInProgress=false;
     final ExecutorService cloudExecutor=Executors.newSingleThreadExecutor();
 
     @Override public void onCreate(Bundle b){super.onCreate(b); getWindow().setStatusBarColor(0xFF126B43); getWindow().setNavigationBarColor(0xFFFFFFFF); getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR); db=new DB(this); ensureAccount(); buildUI(); checkPin(); trySilentGoogleAuthorization();}
@@ -49,8 +50,11 @@ public class MainActivity extends AppCompatActivity {
         if("Google Drive".equals(getPreferences(0).getString("cloud_provider","")))authorizeGoogleDrive(false);
     }
     void authorizeGoogleDrive(boolean userInitiated){
+        if(googleAuthorizationInProgress)return;
+        googleAuthorizationInProgress=true;
         AuthorizationRequest request=AuthorizationRequest.builder().setRequestedScopes(Arrays.asList(new Scope(DRIVE_SCOPE))).build();
         Identity.getAuthorizationClient(this).authorize(request).addOnSuccessListener(result->{
+            googleAuthorizationInProgress=false;
             if(result.hasResolution()){
                 if(userInitiated){
                     try{startIntentSenderForResult(result.getPendingIntent().getIntentSender(),REQ_GOOGLE_AUTH,null,0,0,0);}
@@ -62,9 +66,10 @@ public class MainActivity extends AppCompatActivity {
                 getPreferences(0).edit().putString("cloud_provider","Google Drive").remove("cloud_tree_uri").apply();
                 uploadGoogleDriveBackup();
             }
-        }).addOnFailureListener(e->{android.util.Log.e("MeineFinanzen","Google-Drive-Autorisierung fehlgeschlagen",e);if(userInitiated)toast("Google-Anmeldung fehlgeschlagen: "+e.getMessage());});
+        }).addOnFailureListener(e->{googleAuthorizationInProgress=false;android.util.Log.e("MeineFinanzen","Google-Drive-Autorisierung fehlgeschlagen",e);if(userInitiated)toast("Google-Anmeldung fehlgeschlagen: "+e.getMessage());});
     }
     void handleGoogleAuthorizationResult(Intent data){
+        googleAuthorizationInProgress=false;
         try{
             AuthorizationResult result=Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(data);
             googleAccessToken=result.getAccessToken();
@@ -260,7 +265,7 @@ public class MainActivity extends AppCompatActivity {
             .setNegativeButton("Beenden",(d,w)->finish()).show();
     }
     void backupDialog(){
-        boolean cloud=getPreferences(0).contains("cloud_tree_uri");
+        boolean cloud=getPreferences(0).contains("cloud_tree_uri")||"Google Drive".equals(getPreferences(0).getString("cloud_provider",""));
         String provider=getPreferences(0).getString("cloud_provider","");
         String cloudLabel=provider.isEmpty()?"Cloud-Backup":("Cloud-Backup ("+provider+")");
         String[] opts={"Backup auf Gerät speichern","Backup importieren / wiederherstellen",cloud?cloudLabel+" ändern":"Cloud-Backup einrichten","Cloud-Backup deaktivieren"};
