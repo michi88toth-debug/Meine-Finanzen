@@ -42,6 +42,7 @@ public class MainActivity extends AppCompatActivity {
     String googleAccessToken=null;
     long googleTokenValidUntil=0;
     boolean googleAuthorizationInProgress=false;
+    boolean needsUnlockOnResume=false;
     final ExecutorService cloudExecutor=Executors.newSingleThreadExecutor();
 
     @Override public void onCreate(Bundle b){super.onCreate(b); getWindow().setStatusBarColor(0xFF126B43); getWindow().setNavigationBarColor(0xFFFFFFFF); getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR); db=new DB(this); ensureAccount(); buildUI(); checkPin(); trySilentGoogleAuthorization();}
@@ -116,7 +117,8 @@ public class MainActivity extends AppCompatActivity {
             }catch(Exception e){android.util.Log.e("MeineFinanzen","Google-Drive-Backup fehlgeschlagen",e);runOnUiThread(()->toast("Google-Drive-Backup fehlgeschlagen."));}
         });
     }
-    @Override protected void onStop(){super.onStop();saveAutomaticBackup();}
+    @Override protected void onStop(){super.onStop();needsUnlockOnResume=true;saveAutomaticBackup();}
+    @Override protected void onResume(){super.onResume();if(needsUnlockOnResume){needsUnlockOnResume=false;checkPin();}}
     int dp(float v){return (int)(v*getResources().getDisplayMetrics().density+.5f);}
     TextView text(String s,int size,int color,boolean bold){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);if(bold)t.setTypeface(null,1);return t;}
     GradientDrawable shape(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
