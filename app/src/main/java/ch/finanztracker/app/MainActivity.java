@@ -78,7 +78,7 @@ public class MainActivity extends AppCompatActivity {
             getPreferences(0).edit().putString("cloud_provider","Google Drive").remove("cloud_tree_uri").apply();
             toast("Google Drive wurde verbunden.");
             uploadGoogleDriveBackup();
-        }catch(Exception e){android.util.Log.e("MeineFinanzen","Google-Autorisierung fehlgeschlagen",e);toast("Google-Anmeldung wurde nicht abgeschlossen.");}
+        }catch(Exception e){android.util.Log.e("MeineFinanzen","Google-Autorisierung fehlgeschlagen",e);String detail=e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();if(detail.length()>160)detail=detail.substring(0,160);toast("Google-Autorisierung: "+detail);}
     }
     void uploadGoogleDriveBackup(){
         if(googleAccessToken==null||googleAccessToken.isEmpty())return;
@@ -192,7 +192,7 @@ public class MainActivity extends AppCompatActivity {
     void exportDialog(){new AlertDialog.Builder(this).setTitle("Exportformat wählen").setItems(new String[]{"PDF (A4)","Excel (CSV)"},(d,w)->{exportRows.clear();Cursor c=db.entries(accountId,selectedMonth,selectedYear);while(c.moveToNext())exportRows.add(new String[]{c.getString(1),c.getString(2),String.format(Locale.US,"%.2f",c.getDouble(3)),c.getInt(4)==1?"Einnahme":"Ausgabe"});c.close();Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType(w==0?"application/pdf":"text/csv");i.putExtra(Intent.EXTRA_TITLE,w==0?"Meine-Finanzen.pdf":"Meine-Finanzen.csv");startActivityForResult(i,w==0?REQ_PDF:REQ_CSV);}).show();}
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
-        if(request==REQ_GOOGLE_AUTH){if(result==RESULT_OK&&data!=null)handleGoogleAuthorizationResult(data);else toast("Google-Anmeldung abgebrochen.");return;}
+        if(request==REQ_GOOGLE_AUTH){android.util.Log.d("MeineFinanzen","Google Auth resultCode="+result+" data="+(data!=null));if(data!=null)handleGoogleAuthorizationResult(data);else toast("Google-Anmeldung abgebrochen (Ergebnis "+result+"). Bitte erneut versuchen.");return;}
         if(result!=RESULT_OK||data==null)return;
         try{Uri u=data.getData();if(request==REQ_CSV)writeCsv(u);else if(request==REQ_PDF)writePdf(u);else if(request==REQ_BACKUP)writeBackup(u);else if(request==REQ_RESTORE)readBackup(u);else if(request==REQ_CLOUD_FOLDER)saveCloudFolder(data);}
         catch(Exception e){toast("Datei konnte nicht verarbeitet werden: "+e.getMessage());}
