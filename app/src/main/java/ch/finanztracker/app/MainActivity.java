@@ -260,7 +260,7 @@ public class MainActivity extends AppCompatActivity {
             LinearLayout card=row();card.setBackground(shape(0xFFFFFFFF,12));card.setPadding(dp(12),dp(10),dp(12),dp(10));LinearLayout.LayoutParams cp=lp(-1,-2);cp.bottomMargin=dp(8);list.addView(card,cp);
             View stripe=new View(this);stripe.setBackgroundColor(income?GREEN:RED);card.addView(stripe,lp(4,44));
             LinearLayout info=column();LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(0,-2,1);ip.leftMargin=dp(10);card.addView(info,ip);
-            info.addView(text(purpose,15,DARK,true));info.addView(text(date,12,0xFF718078,false));
+            info.addView(text(purpose.isEmpty()?"Ohne Zweck":purpose,15,DARK,true));info.addView(text(date,12,0xFF718078,false));
             TextView val=text((income?"+ ":"− ")+money(amount),15,income?GREEN:RED,true);card.addView(val);
             card.setOnClickListener(v->confirmEdit(id,purpose,date,amount,income));
         }
@@ -274,14 +274,14 @@ public class MainActivity extends AppCompatActivity {
         date.setOnClickListener(v->new DatePickerDialog(this,(view,yy,mm,dd)->{cal.set(yy,mm,dd);date.setText("Datum: "+String.format(Locale.GERMANY,"%02d.%02d.%04d",dd,mm+1,yy)+"  ✎");},cal.get(Calendar.YEAR),cal.get(Calendar.MONTH),cal.get(Calendar.DAY_OF_MONTH)).show());
         if(existing!=null){Cursor e=db.one(existing[0]);if(e.moveToFirst()){purpose.setText(e.getString(1));amount.setText(""+e.getDouble(3));try{cal.setTime(new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).parse(e.getString(2)));}catch(Exception ignored){}date.setText("Datum: "+e.getString(2)+"  ✎");}e.close();}
         new AlertDialog.Builder(this).setTitle(income?"Einnahme erfassen":"Ausgabe erfassen").setView(box).setNegativeButton("Abbrechen",null).setPositiveButton(existing==null?"Speichern":"Änderungen speichern",(d,w)->{
-            String p=purpose.getText().toString().trim();String a=amount.getText().toString().trim().replace(",",".");if(p.isEmpty()||a.isEmpty()){toast("Bitte Zweck und Betrag eingeben.");return;}
+            String p=purpose.getText().toString().trim();String a=amount.getText().toString().trim().replace(",",".");if(a.isEmpty()){toast("Bitte einen Betrag eingeben.");return;}
             try{double n=Double.parseDouble(a);if(n<=0)throw new Exception();String dt=new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).format(cal.getTime());if(existing==null)db.addEntry(accountId,p,dt,n,income);else db.updateEntry(existing[0],p,dt,n,income);refresh();}catch(Exception ex){toast("Bitte einen gültigen Betrag eingeben.");}
         }).show();
     }
     void confirmEdit(int id,String p,String date,double amt,boolean income){
         new AlertDialog.Builder(this).setMessage("Willst du den Eintrag bearbeiten?").setNegativeButton("Nein",null).setPositiveButton("Ja",(d,w)->new AlertDialog.Builder(this).setTitle("Eintrag bearbeiten").setItems(new String[]{"Bearbeiten","Löschen","Abbrechen"},(x,which)->{if(which==0)entryDialog(income,new int[]{id});else if(which==1)new AlertDialog.Builder(this).setMessage("Eintrag wirklich löschen?").setNegativeButton("Nein",null).setPositiveButton("Löschen",(a,b)->{db.deleteEntry(id);refresh();}).show();}).show()).show();
     }
-    void exportDialog(){new AlertDialog.Builder(this).setTitle("Exportformat wählen").setItems(new String[]{"PDF (A4)","Excel (CSV)"},(d,w)->{exportRows.clear();Cursor c=db.entries(accountId,selectedMonth,selectedYear);while(c.moveToNext())exportRows.add(new String[]{c.getString(1),c.getString(2),String.format(Locale.US,"%.2f",c.getDouble(3)),c.getInt(4)==1?"Einnahme":"Ausgabe"});c.close();Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType(w==0?"application/pdf":"text/csv");i.putExtra(Intent.EXTRA_TITLE,w==0?"Meine-Finanzen.pdf":"Meine-Finanzen.csv");startActivityForResult(i,w==0?REQ_PDF:REQ_CSV);}).show();}
+    void exportDialog(){new AlertDialog.Builder(this).setTitle("Exportformat wählen").setItems(new String[]{"PDF (A4)","Excel (CSV)"},(d,w)->{exportRows.clear();Cursor c=db.entries(accountId,selectedMonth,selectedYear);while(c.moveToNext())exportRows.add(new String[]{(c.getString(1)==null||c.getString(1).trim().isEmpty())?"Ohne Zweck":c.getString(1),c.getString(2),String.format(Locale.US,"%.2f",c.getDouble(3)),c.getInt(4)==1?"Einnahme":"Ausgabe"});c.close();Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType(w==0?"application/pdf":"text/csv");i.putExtra(Intent.EXTRA_TITLE,w==0?"Meine-Finanzen.pdf":"Meine-Finanzen.csv");startActivityForResult(i,w==0?REQ_PDF:REQ_CSV);}).show();}
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
         if(request==REQ_GOOGLE_AUTH){android.util.Log.d("MeineFinanzen","Google Auth resultCode="+result+" data="+(data!=null));if(data!=null)handleGoogleAuthorizationResult(data);else showErrorDialog("Google-Anmeldung abgebrochen","Google hat kein Ergebnis an die App zurückgegeben. Rückgabecode: "+result);return;}
