@@ -279,15 +279,7 @@ public class MainActivity extends AppCompatActivity {
         }).show();
     }
     void chooseCloudProvider(){
-        new AlertDialog.Builder(this).setTitle("Cloud-Anbieter auswählen")
-            .setItems(new String[]{"Google Drive","OneDrive"},(dialog,which)->{
-                if(which==0){authorizeGoogleDrive(true);return;}
-                pendingCloudProvider="OneDrive";
-                toast("Melde dich an und wähle oder erstelle einen OneDrive-Backup-Ordner.");
-                Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-                startActivityForResult(i,REQ_CLOUD_FOLDER);
-            }).show();
+        authorizeGoogleDrive(true);
     }
     void saveCloudFolder(Intent data){
         Uri tree=data.getData();if(tree==null)return;
