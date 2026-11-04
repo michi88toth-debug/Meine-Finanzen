@@ -6,6 +6,7 @@ import android.content.*;
 import android.database.*;
 import android.database.sqlite.*;
 import android.graphics.*;
+import android.graphics.drawable.GradientDrawable;
 import android.graphics.pdf.PdfDocument;
 import android.net.Uri;
 import android.text.InputType;
