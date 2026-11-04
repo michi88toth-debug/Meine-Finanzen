@@ -9,6 +9,7 @@ import android.graphics.*;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.pdf.PdfDocument;
 import android.net.Uri;
+import android.provider.DocumentsContract;
 import android.text.InputType;
 import android.view.*;
 import android.widget.*;
@@ -26,10 +27,11 @@ public class MainActivity extends AppCompatActivity {
     TextView expenses, incomes, balance; ArrayList<String> accounts=new ArrayList<>(); int accountId=-1;
     String[] months={"Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember","Ganzes Jahr"};
     int selectedMonth=Calendar.getInstance().get(Calendar.MONTH)+1, selectedYear=Calendar.getInstance().get(Calendar.YEAR);
-    final int REQ_CSV=11, REQ_PDF=12, REQ_BACKUP=13, REQ_RESTORE=14;
+    final int REQ_CSV=11, REQ_PDF=12, REQ_BACKUP=13, REQ_RESTORE=14, REQ_CLOUD_FOLDER=15;
     ArrayList<String[]> exportRows=new ArrayList<>();
 
     @Override public void onCreate(Bundle b){super.onCreate(b); getWindow().setStatusBarColor(0xFF126B43); getWindow().setNavigationBarColor(0xFFFFFFFF); getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR); db=new DB(this); ensureAccount(); buildUI(); checkPin();}
+    @Override protected void onStop(){super.onStop();saveAutomaticBackup();}
     int dp(float v){return (int)(v*getResources().getDisplayMetrics().density+.5f);}
     TextView text(String s,int size,int color,boolean bold){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);if(bold)t.setTypeface(null,1);return t;}
     GradientDrawable shape(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
@@ -101,7 +103,7 @@ public class MainActivity extends AppCompatActivity {
         new AlertDialog.Builder(this).setMessage("Willst du den Eintrag bearbeiten?").setNegativeButton("Nein",null).setPositiveButton("Ja",(d,w)->new AlertDialog.Builder(this).setTitle("Eintrag bearbeiten").setItems(new String[]{"Bearbeiten","Löschen","Abbrechen"},(x,which)->{if(which==0)entryDialog(income,new int[]{id});else if(which==1)new AlertDialog.Builder(this).setMessage("Eintrag wirklich löschen?").setNegativeButton("Nein",null).setPositiveButton("Löschen",(a,b)->{db.deleteEntry(id);refresh();}).show();}).show()).show();
     }
     void exportDialog(){new AlertDialog.Builder(this).setTitle("Exportformat wählen").setItems(new String[]{"PDF (A4)","Excel (CSV)"},(d,w)->{exportRows.clear();Cursor c=db.entries(accountId,selectedMonth,selectedYear);while(c.moveToNext())exportRows.add(new String[]{c.getString(1),c.getString(2),String.format(Locale.US,"%.2f",c.getDouble(3)),c.getInt(4)==1?"Einnahme":"Ausgabe"});c.close();Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType(w==0?"application/pdf":"text/csv");i.putExtra(Intent.EXTRA_TITLE,w==0?"Meine-Finanzen.pdf":"Meine-Finanzen.csv");startActivityForResult(i,w==0?REQ_PDF:REQ_CSV);}).show();}
-    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(result!=RESULT_OK||data==null)return;try{Uri u=data.getData();if(request==REQ_CSV)writeCsv(u);else if(request==REQ_PDF)writePdf(u);else if(request==REQ_BACKUP)writeBackup(u);else if(request==REQ_RESTORE)readBackup(u);}catch(Exception e){toast("Datei konnte nicht verarbeitet werden: "+e.getMessage());}}
+    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(result!=RESULT_OK||data==null)return;try{Uri u=data.getData();if(request==REQ_CSV)writeCsv(u);else if(request==REQ_PDF)writePdf(u);else if(request==REQ_BACKUP)writeBackup(u);else if(request==REQ_RESTORE)readBackup(u);else if(request==REQ_CLOUD_FOLDER)saveCloudFolder(data);}catch(Exception e){toast("Datei konnte nicht verarbeitet werden: "+e.getMessage());}}
     void writeCsv(Uri uri)throws Exception{try(Writer w=new OutputStreamWriter(getContentResolver().openOutputStream(uri),"UTF-8")){w.write("\uFEFFZweck;Datum;Betrag CHF;Art\n");for(String[]r:exportRows)w.write(csv(r[0])+";"+r[1]+";"+r[2].replace(".",",")+";"+r[3]+"\n");}toast("Excel-Datei gespeichert.");}
     String csv(String s){String q=String.valueOf((char)34);return q+s.replace(q,q+q)+q;}
     void writePdf(Uri uri)throws Exception{
@@ -171,8 +173,57 @@ public class MainActivity extends AppCompatActivity {
             .setPositiveButton("Entsperren",(d,w)->{if(!e.getText().toString().equals(getPreferences(0).getString("pin",""))){toast("PIN falsch. Bitte App erneut öffnen und nochmals versuchen.");finish();}})
             .setNegativeButton("Beenden",(d,w)->finish()).show();
     }
-    void backupDialog(){new AlertDialog.Builder(this).setTitle("Datensicherung").setItems(new String[]{"Backup auf Gerät speichern","Backup importieren / wiederherstellen","Cloud-Backup (Google Drive / OneDrive)"},(d,w)->{Intent i=new Intent(w==1?Intent.ACTION_OPEN_DOCUMENT:Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);if(w==1){i.setType("application/json");startActivityForResult(i,REQ_RESTORE);}else if(w==0){i.setType("application/json");i.putExtra(Intent.EXTRA_TITLE,"Meine-Finanzen-Backup.json");startActivityForResult(i,REQ_BACKUP);}else toast("Cloud-Sicherung benötigt eine persönliche Google-Drive- oder OneDrive-Anmeldung und wird in einem nächsten Ausbauschritt eingerichtet.");}).show();}
-    void writeBackup(Uri uri)throws Exception{org.json.JSONArray aa=new org.json.JSONArray(),ee=new org.json.JSONArray();for(String a:db.accounts())aa.put(a);Cursor c=db.allEntries();while(c.moveToNext()){org.json.JSONObject o=new org.json.JSONObject();o.put("account",c.getString(1));o.put("purpose",c.getString(2));o.put("date",c.getString(3));o.put("amount",c.getDouble(4));o.put("income",c.getInt(5)==1);ee.put(o);}c.close();org.json.JSONObject root=new org.json.JSONObject();root.put("accounts",aa);root.put("entries",ee);try(Writer w=new OutputStreamWriter(getContentResolver().openOutputStream(uri),"UTF-8")){w.write(root.toString(2));}toast("Backup gespeichert.");}
+    void backupDialog(){
+        boolean cloud=getPreferences(0).contains("cloud_tree_uri");
+        String[] opts={"Backup auf Gerät speichern","Backup importieren / wiederherstellen",cloud?"Cloud-Ordner ändern (Google Drive / OneDrive)":"Cloud-Backup einrichten (Google Drive / OneDrive)","Cloud-Backup deaktivieren"};
+        new AlertDialog.Builder(this).setTitle("Datensicherung").setItems(opts,(d,w)->{
+            if(w==0){Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");i.putExtra(Intent.EXTRA_TITLE,"Meine-Finanzen-Backup.json");startActivityForResult(i,REQ_BACKUP);}
+            else if(w==1){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");startActivityForResult(i,REQ_RESTORE);}
+            else if(w==2){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(i,REQ_CLOUD_FOLDER);}
+            else if(w==3){getPreferences(0).edit().remove("cloud_tree_uri").apply();toast("Cloud-Backup deaktiviert. Die lokale automatische Sicherung bleibt aktiv.");}
+        }).show();
+    }
+    void saveCloudFolder(Intent data){
+        Uri tree=data.getData();if(tree==null)return;
+        int flags=data.getFlags()&(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        try{getContentResolver().takePersistableUriPermission(tree,flags);}catch(Exception ignored){}
+        getPreferences(0).edit().putString("cloud_tree_uri",tree.toString()).apply();
+        saveAutomaticBackup();
+        toast("Cloud-Ordner eingerichtet. Die Sicherung wird ab jetzt automatisch aktualisiert.");
+    }
+    void saveAutomaticBackup(){
+        try{
+            String json=backupJson();
+            File local=new File(getFilesDir(),"Meine-Finanzen-Backup.json");
+            try(Writer w=new OutputStreamWriter(new FileOutputStream(local),"UTF-8")){w.write(json);}
+            String saved=getPreferences(0).getString("cloud_tree_uri",null);
+            if(saved!=null)writeTreeBackup(Uri.parse(saved),json);
+        }catch(Exception e){android.util.Log.e("MeineFinanzen","Automatisches Backup fehlgeschlagen",e);}
+    }
+    void writeTreeBackup(Uri tree,String json)throws Exception{
+        String fileName="Meine-Finanzen-Backup.json";Uri fileUri=null;
+        String parentId=DocumentsContract.getTreeDocumentId(tree);
+        Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(tree,parentId);
+        try(Cursor c=getContentResolver().query(children,new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME},null,null,null)){
+            if(c!=null)while(c.moveToNext())if(fileName.equals(c.getString(1))){fileUri=DocumentsContract.buildDocumentUriUsingTree(tree,c.getString(0));break;}
+        }
+        if(fileUri==null)fileUri=DocumentsContract.createDocument(getContentResolver(),tree,"application/json",fileName);
+        if(fileUri==null)throw new IOException("Backup-Datei konnte im Cloud-Ordner nicht erstellt werden.");
+        try(OutputStream out=getContentResolver().openOutputStream(fileUri,"wt")){if(out==null)throw new IOException("Cloud-Datei ist nicht beschreibbar.");out.write(json.getBytes("UTF-8"));out.flush();}
+    }
+    String backupJson()throws Exception{
+        org.json.JSONArray aa=new org.json.JSONArray(),ee=new org.json.JSONArray();
+        for(String a:db.accounts())aa.put(a);
+        Cursor c=db.allEntries();
+        while(c.moveToNext()){
+            org.json.JSONObject o=new org.json.JSONObject();o.put("account",c.getString(1));o.put("purpose",c.getString(2));o.put("date",c.getString(3));o.put("amount",c.getDouble(4));o.put("income",c.getInt(5)==1);ee.put(o);
+        }
+        c.close();org.json.JSONObject root=new org.json.JSONObject();root.put("accounts",aa);root.put("entries",ee);root.put("backup_version",1);root.put("created_at",System.currentTimeMillis());return root.toString(2);
+    }
+    void writeBackup(Uri uri)throws Exception{
+        try(Writer w=new OutputStreamWriter(getContentResolver().openOutputStream(uri),"UTF-8")){w.write(backupJson());}
+        toast("Backup gespeichert.");
+    }
     void readBackup(Uri uri)throws Exception{StringBuilder s=new StringBuilder();try(BufferedReader r=new BufferedReader(new InputStreamReader(getContentResolver().openInputStream(uri),"UTF-8"))){String line;while((line=r.readLine())!=null)s.append(line);}org.json.JSONObject j=new org.json.JSONObject(s.toString());db.clearAll();org.json.JSONArray aa=j.getJSONArray("accounts");for(int i=0;i<aa.length();i++)db.addAccount(aa.getString(i));org.json.JSONArray ee=j.getJSONArray("entries");for(int i=0;i<ee.length();i++){org.json.JSONObject o=ee.getJSONObject(i);int aid=db.accountId(o.getString("account"));db.addEntry(aid,o.getString("purpose"),o.getString("date"),o.getDouble("amount"),o.getBoolean("income"));}accountId=-1;reloadAccounts();refresh();toast("Backup wiederhergestellt.");}
     void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
 
