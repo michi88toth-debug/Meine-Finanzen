@@ -89,13 +89,33 @@ public class MainActivity extends AppCompatActivity {
         if(googleAccessToken!=null&&System.currentTimeMillis()<googleTokenValidUntil){pendingGoogleRestore=false;downloadGoogleDriveBackup();}
         else authorizeGoogleDrive(true);
     }
+    String findOrCreateGoogleDriveFolder(okhttp3.OkHttpClient client,String token)throws Exception{
+        String query=java.net.URLEncoder.encode("name = 'MeineFinanzen' and mimeType = 'application/vnd.google-apps.folder' and trashed = false","UTF-8");
+        okhttp3.Request find=new okhttp3.Request.Builder().url("https://www.googleapis.com/drive/v3/files?q="+query+"&spaces=drive&pageSize=10&fields=files(id)").header("Authorization","Bearer "+token).get().build();
+        try(okhttp3.Response response=client.newCall(find).execute()){
+            String body=response.body()==null?"":response.body().string();
+            if(!response.isSuccessful())throw new IOException("Google Drive Ordnersuche HTTP "+response.code()+": "+body);
+            org.json.JSONArray folders=new org.json.JSONObject(body).optJSONArray("files");
+            if(folders!=null&&folders.length()>0)return folders.getJSONObject(0).getString("id");
+        }
+        org.json.JSONObject metadata=new org.json.JSONObject();metadata.put("name","MeineFinanzen");metadata.put("mimeType","application/vnd.google-apps.folder");
+        okhttp3.Request create=new okhttp3.Request.Builder().url("https://www.googleapis.com/drive/v3/files?fields=id").header("Authorization","Bearer "+token).post(okhttp3.RequestBody.create(metadata.toString(),okhttp3.MediaType.parse("application/json; charset=utf-8"))).build();
+        try(okhttp3.Response response=client.newCall(create).execute()){
+            String body=response.body()==null?"":response.body().string();
+            if(!response.isSuccessful())throw new IOException("Google Drive Ordner konnte nicht erstellt werden HTTP "+response.code()+": "+body);
+            String id=new org.json.JSONObject(body).optString("id","");
+            if(id.isEmpty())throw new IOException("Google Drive hat keine Ordner-ID zurückgegeben.");
+            return id;
+        }
+    }
     void downloadGoogleDriveBackup(){
         if(googleAccessToken==null||googleAccessToken.isEmpty()){toast("Bitte zuerst Google Drive verbinden.");return;}
         final String token=googleAccessToken;
         cloudExecutor.execute(()->{
             try{
                 okhttp3.OkHttpClient client=new okhttp3.OkHttpClient();
-                String query=java.net.URLEncoder.encode("name = 'Meine-Finanzen-Backup.json' and trashed = false","UTF-8");
+                String folderId=findOrCreateGoogleDriveFolder(client,token);
+                String query=java.net.URLEncoder.encode("name = 'Meine-Finanzen-Backup.json' and '"+folderId+"' in parents and trashed = false","UTF-8");
                 okhttp3.Request listRequest=new okhttp3.Request.Builder()
                     .url("https://www.googleapis.com/drive/v3/files?q="+query+"&spaces=drive&orderBy=modifiedTime%20desc&pageSize=10&fields=files(id,name,modifiedTime)")
                     .header("Authorization","Bearer "+token).get().build();
@@ -106,7 +126,7 @@ public class MainActivity extends AppCompatActivity {
                     org.json.JSONArray files=new org.json.JSONObject(body).optJSONArray("files");
                     if(files!=null&&files.length()>0)fileId=files.getJSONObject(0).optString("id",null);
                 }
-                if(fileId==null||fileId.isEmpty())throw new IOException("In Google Drive wurde kein Backup namens Meine-Finanzen-Backup.json gefunden.");
+                if(fileId==null||fileId.isEmpty())throw new IOException("Im Google-Drive-Ordner MeineFinanzen wurde kein Backup namens Meine-Finanzen-Backup.json gefunden.");
                 okhttp3.Request getRequest=new okhttp3.Request.Builder()
                     .url("https://www.googleapis.com/drive/v3/files/"+fileId+"?alt=media")
                     .header("Authorization","Bearer "+token).get().build();
@@ -137,12 +157,22 @@ public class MainActivity extends AppCompatActivity {
         cloudExecutor.execute(()->{
             try{
                 okhttp3.OkHttpClient client=new okhttp3.OkHttpClient();
-                String fileId=getPreferences(0).getString("google_drive_file_id",null);
+                String folderId=findOrCreateGoogleDriveFolder(client,token);
+                String fileQuery=java.net.URLEncoder.encode("name = 'Meine-Finanzen-Backup.json' and '"+folderId+"' in parents and trashed = false","UTF-8");
+                okhttp3.Request findFile=new okhttp3.Request.Builder().url("https://www.googleapis.com/drive/v3/files?q="+fileQuery+"&spaces=drive&pageSize=10&fields=files(id)").header("Authorization","Bearer "+token).get().build();
+                String fileId=null;
+                try(okhttp3.Response response=client.newCall(findFile).execute()){
+                    String responseText=response.body()==null?"":response.body().string();
+                    if(!response.isSuccessful())throw new IOException("Google Drive Suche HTTP "+response.code()+": "+responseText);
+                    org.json.JSONArray files=new org.json.JSONObject(responseText).optJSONArray("files");
+                    if(files!=null&&files.length()>0)fileId=files.getJSONObject(0).optString("id",null);
+                }
                 okhttp3.MediaType media=okhttp3.MediaType.parse("application/json; charset=utf-8");
                 okhttp3.RequestBody body=okhttp3.RequestBody.create(json,media);
                 okhttp3.Request request;
                 if(fileId==null||fileId.isEmpty()){
-                    okhttp3.RequestBody metadata=okhttp3.RequestBody.create("{\"name\":\"Meine-Finanzen-Backup.json\"}",media);
+                    org.json.JSONObject metadataJson=new org.json.JSONObject();metadataJson.put("name","Meine-Finanzen-Backup.json");metadataJson.put("parents",new org.json.JSONArray().put(folderId));
+                    okhttp3.RequestBody metadata=okhttp3.RequestBody.create(metadataJson.toString(),media);
                     okhttp3.RequestBody multipart=new okhttp3.MultipartBody.Builder()
                         .setType(okhttp3.MediaType.parse("multipart/related"))
                         .addPart(metadata)
@@ -156,18 +186,31 @@ public class MainActivity extends AppCompatActivity {
                 try(okhttp3.Response response=client.newCall(request).execute()){
                     String responseText=response.body()==null?"":response.body().string();
                     if(!response.isSuccessful())throw new IOException("Google Drive HTTP "+response.code()+": "+responseText);
-                    if(fileId==null||fileId.isEmpty()){
+                    String savedId=fileId;
+                    if(savedId==null||savedId.isEmpty()){
                         String newId=new org.json.JSONObject(responseText).optString("id","");
                         if(newId.isEmpty())throw new IOException("Keine Datei-ID erhalten.");
                         getPreferences(0).edit().putString("google_drive_file_id",newId).apply();
-                    }
+                    }else getPreferences(0).edit().putString("google_drive_file_id",savedId).apply();
                     runOnUiThread(()->toast("Backup erfolgreich in Google Drive gespeichert."));
                 }
             }catch(Exception e){android.util.Log.e("MeineFinanzen","Google-Drive-Backup fehlgeschlagen",e);String detail=e.toString();for(Throwable cause=e.getCause();cause!=null;cause=cause.getCause())detail+="\nUrsache: "+cause;final String errorDetail=detail;runOnUiThread(()->showErrorDialog("Google-Drive-Backup fehlgeschlagen",errorDetail));}
         });
     }
     @Override protected void onStop(){super.onStop();needsUnlockOnResume=true;saveAutomaticBackup();}
-    @Override protected void onResume(){super.onResume();if(needsUnlockOnResume){needsUnlockOnResume=false;checkPin();}}
+    @Override protected void onResume(){super.onResume();updatePeriodToCurrent();if(needsUnlockOnResume){needsUnlockOnResume=false;checkPin();}}
+    void updatePeriodToCurrent(){
+        Calendar now=Calendar.getInstance();int month=now.get(Calendar.MONTH)+1,year=now.get(Calendar.YEAR);
+        boolean changed=selectedMonth!=month||selectedYear!=year;
+        if(!changed)return;
+        selectedMonth=month;selectedYear=year;
+        if(monthSpin!=null)monthSpin.setSelection(month-1);
+        if(yearSpin!=null&&yearSpin.getAdapter()!=null){
+            int position=-1;for(int i=0;i<yearSpin.getAdapter().getCount();i++)if(String.valueOf(year).equals(yearSpin.getAdapter().getItem(i))){position=i;break;}
+            if(position>=0)yearSpin.setSelection(position);
+        }
+        refresh();
+    }
     int dp(float v){return (int)(v*getResources().getDisplayMetrics().density+.5f);}
     TextView text(String s,int size,int color,boolean bold){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);if(bold)t.setTypeface(null,1);return t;}
     GradientDrawable shape(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
@@ -201,7 +244,7 @@ public class MainActivity extends AppCompatActivity {
     }
     void setupFilters(){
         ArrayList<String> ms=new ArrayList<>(Arrays.asList(months));ArrayAdapter<String> ma=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,ms);monthSpin.setAdapter(ma);monthSpin.setSelection(Math.max(0,Math.min(12,selectedMonth-1)));
-        ArrayList<String> ys=new ArrayList<>();int y=Calendar.getInstance().get(Calendar.YEAR);for(int i=y-8;i<=y+1;i++)ys.add(""+i);
+        ArrayList<String> ys=new ArrayList<>();int y=Calendar.getInstance().get(Calendar.YEAR);for(int i=y-8;i<=2040;i++)ys.add(""+i);
         yearSpin.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,ys));yearSpin.setSelection(ys.indexOf(""+selectedYear));
         monthSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){selectedMonth=pos==12?0:pos+1;refresh();}});
         yearSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){selectedYear=Integer.parseInt(ys.get(pos));refresh();}});
@@ -373,14 +416,20 @@ public class MainActivity extends AppCompatActivity {
         }catch(Exception e){android.util.Log.e("MeineFinanzen","Automatisches Backup fehlgeschlagen",e);}
     }
     void writeTreeBackup(Uri tree,String json)throws Exception{
-        String fileName="Meine-Finanzen-Backup.json";Uri fileUri=null;
-        String parentId=DocumentsContract.getTreeDocumentId(tree);
-        Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(tree,parentId);
+        String folderName="MeineFinanzen",fileName="Meine-Finanzen-Backup.json";Uri folderUri=null;
+        String rootId=DocumentsContract.getTreeDocumentId(tree);
+        Uri rootChildren=DocumentsContract.buildChildDocumentsUriUsingTree(tree,rootId);
+        try(Cursor c=getContentResolver().query(rootChildren,new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME},null,null,null)){
+            if(c!=null)while(c.moveToNext())if(folderName.equals(c.getString(1))){folderUri=DocumentsContract.buildDocumentUriUsingTree(tree,c.getString(0));break;}
+        }
+        if(folderUri==null)folderUri=DocumentsContract.createDocument(getContentResolver(),tree,DocumentsContract.Document.MIME_TYPE_DIR,folderName);
+        if(folderUri==null)throw new IOException("Der Cloud-Ordner MeineFinanzen konnte nicht erstellt werden.");
+        String folderId=DocumentsContract.getDocumentId(folderUri);Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(tree,folderId);Uri fileUri=null;
         try(Cursor c=getContentResolver().query(children,new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME},null,null,null)){
             if(c!=null)while(c.moveToNext())if(fileName.equals(c.getString(1))){fileUri=DocumentsContract.buildDocumentUriUsingTree(tree,c.getString(0));break;}
         }
-        if(fileUri==null)fileUri=DocumentsContract.createDocument(getContentResolver(),tree,"application/json",fileName);
-        if(fileUri==null)throw new IOException("Backup-Datei konnte im Cloud-Ordner nicht erstellt werden.");
+        if(fileUri==null)fileUri=DocumentsContract.createDocument(getContentResolver(),folderUri,"application/json",fileName);
+        if(fileUri==null)throw new IOException("Backup-Datei konnte im Ordner MeineFinanzen nicht erstellt werden.");
         try(OutputStream out=getContentResolver().openOutputStream(fileUri,"wt")){if(out==null)throw new IOException("Cloud-Datei ist nicht beschreibbar.");out.write(json.getBytes("UTF-8"));out.flush();}
     }
     String backupJson()throws Exception{
