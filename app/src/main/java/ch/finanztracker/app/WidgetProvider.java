@@ -37,7 +37,7 @@ public class WidgetProvider extends AppWidgetProvider {
         for (String name : names) total += db.accountBalance(db.accountId(name));
         views.setTextViewText(R.id.widget_account_name, names.isEmpty() ? "Kein Konto" : last);
         views.setTextViewText(R.id.widget_account_balance, money(accountBalance));
-        views.setTextViewText(R.id.widget_total_balance, money(total));
+        views.setTextViewText(R.id.widget_total_balance, "Gesamtsaldo: " + money(total));
 
         Intent open = new Intent(context, MainActivity.class);
         open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
