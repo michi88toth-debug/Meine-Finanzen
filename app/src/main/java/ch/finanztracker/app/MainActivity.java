@@ -150,7 +150,7 @@ public class MainActivity extends AppCompatActivity {
         new AlertDialog.Builder(this).setTitle("Quittung (PDF, "+count+" Seite"+(count==1?"":"n")+")").setView(scroll).setPositiveButton("Schliessen",null).show();
     }
     void receiptChoiceDialog(){
-        new AlertDialog.Builder(this).setTitle("Quittung hinzufügen").setItems(new String[]{"Fotografieren","Von Gerät"},(d,w)->{if(w==0)captureReceipt();else chooseReceiptFile();}).show();
+        new AlertDialog.Builder(this).setTitle("Quittung hinzufügen").setItems(new String[]{"Kamera","Von Gerät"},(d,w)->{if(w==0)captureReceipt();else chooseReceiptFile();}).show();
     }
     void chooseReceiptFile(){
         Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT);pick.addCategory(Intent.CATEGORY_OPENABLE);pick.setType("*/*");pick.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"image/*","application/pdf"});pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
