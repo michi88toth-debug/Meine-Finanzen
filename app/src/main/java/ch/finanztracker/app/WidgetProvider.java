@@ -45,6 +45,13 @@ public class WidgetProvider extends AppWidgetProvider {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         views.setOnClickPendingIntent(R.id.widget_root, openPending);
 
+        Intent cycle = new Intent(context, MainActivity.class);
+        cycle.putExtra("widget_action", "cycle_account");
+        cycle.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent cyclePending = PendingIntent.getActivity(context, id * 10 + 3, cycle,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        views.setOnClickPendingIntent(R.id.widget_account_name, cyclePending);
+
         Intent income = new Intent(context, MainActivity.class);
         income.putExtra("widget_action", "income");
         income.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
