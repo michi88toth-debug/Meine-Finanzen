@@ -38,7 +38,7 @@ public class MainActivity extends AppCompatActivity {
     final ExecutorService cloudExecutor=Executors.newSingleThreadExecutor();
     String activeReceiptPath=""; String pendingReceiptCapturePath=""; String pendingReceiptPdfPath=""; TextView receiptAddButton; String pendingWidgetAction="";
 
-    @Override public void onCreate(Bundle b){super.onCreate(b); getWindow().setStatusBarColor(0xFF126B43); getWindow().setNavigationBarColor(0xFFFFFFFF); getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR); db=new DB(this); ensureAccount(); buildUI(); pendingWidgetAction=getIntent().getStringExtra("widget_action"); checkPin();}
+    @Override public void onCreate(Bundle b){super.onCreate(b); getWindow().setStatusBarColor(0xFF126B43); getWindow().setNavigationBarColor(0xFFFFFFFF); getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR); db=new DB(this); ensureAccount(); if("cycle_account".equals(getIntent().getStringExtra("widget_action")))cycleWidgetAccount(); buildUI(); pendingWidgetAction=getIntent().getStringExtra("widget_action"); checkPin();}
 
     @Override protected void onStop(){super.onStop();needsUnlockOnResume=true;saveAutomaticBackup();}
     @Override protected void onResume(){super.onResume();updatePeriodToCurrent();if(needsUnlockOnResume){needsUnlockOnResume=false;checkPin();}}
@@ -247,6 +247,15 @@ public class MainActivity extends AppCompatActivity {
         }
         getPreferences(0).edit().putBoolean("bio_on",true).apply();
         toast("Fingerabdruck-Anmeldung aktiviert.");
+    }
+    void cycleWidgetAccount(){
+        ArrayList<String> names=db.accounts();
+        if(names.isEmpty())return;
+        android.content.SharedPreferences prefs=getPreferences(0);
+        String current=prefs.getString("last_account_name","");
+        int index=names.indexOf(current);
+        String next=names.get((index+1+names.size())%names.size());
+        prefs.edit().putString("last_account_name",next).apply();
     }
     void handleWidgetActionIfUnlocked(){
         if(pendingWidgetAction==null||pendingWidgetAction.isEmpty())return;
