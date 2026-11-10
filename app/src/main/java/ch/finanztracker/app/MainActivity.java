@@ -36,9 +36,9 @@ public class MainActivity extends AppCompatActivity {
     ArrayList<String[]> exportRows=new ArrayList<>();
     boolean needsUnlockOnResume=false;
     final ExecutorService cloudExecutor=Executors.newSingleThreadExecutor();
-    String activeReceiptPath=""; String pendingReceiptCapturePath=""; String pendingReceiptPdfPath=""; TextView receiptAddButton;
+    String activeReceiptPath=""; String pendingReceiptCapturePath=""; String pendingReceiptPdfPath=""; TextView receiptAddButton; String pendingWidgetAction="";
 
-    @Override public void onCreate(Bundle b){super.onCreate(b); getWindow().setStatusBarColor(0xFF126B43); getWindow().setNavigationBarColor(0xFFFFFFFF); getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR); db=new DB(this); ensureAccount(); buildUI(); checkPin();}
+    @Override public void onCreate(Bundle b){super.onCreate(b); getWindow().setStatusBarColor(0xFF126B43); getWindow().setNavigationBarColor(0xFFFFFFFF); getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR); db=new DB(this); ensureAccount(); buildUI(); pendingWidgetAction=getIntent().getStringExtra("widget_action"); checkPin();}
 
     @Override protected void onStop(){super.onStop();needsUnlockOnResume=true;saveAutomaticBackup();}
     @Override protected void onResume(){super.onResume();updatePeriodToCurrent();if(needsUnlockOnResume){needsUnlockOnResume=false;checkPin();}}
@@ -108,7 +108,7 @@ public class MainActivity extends AppCompatActivity {
             TextView val=text((income?"+ ":"− ")+money(amount),15,income?GREEN:RED,true);card.addView(val);
             card.setOnClickListener(v->confirmEdit(id,purpose,date,amount,income));
         }
-        c.close();expenses.setText("Ausgaben\n"+money(exp));incomes.setText("Einnahmen\n"+money(inc));balance.setText("Saldo\n"+money(inc-exp));
+        c.close();expenses.setText("Ausgaben\n"+money(exp));incomes.setText("Einnahmen\n"+money(inc));balance.setText("Saldo\n"+money(inc-exp)); WidgetProvider.updateAll(this);
     }
     String money(double n){return String.format(Locale.GERMANY,"CHF %,.2f",n);}
     void entryDialog(boolean income,int[] existing){
@@ -248,17 +248,23 @@ public class MainActivity extends AppCompatActivity {
         getPreferences(0).edit().putBoolean("bio_on",true).apply();
         toast("Fingerabdruck-Anmeldung aktiviert.");
     }
+    void handleWidgetActionIfUnlocked(){
+        if(pendingWidgetAction==null||pendingWidgetAction.isEmpty())return;
+        String action=pendingWidgetAction;pendingWidgetAction="";
+        if("income".equals(action))entryDialog(true,null);
+        else if("expense".equals(action))entryDialog(false,null);
+    }
     void checkPin(){
         boolean pinOn=getPreferences(0).getBoolean("pin_on",false);
         boolean bioOn=getPreferences(0).getBoolean("bio_on",false);
         if(bioOn){showBiometricPrompt();return;}
-        if(pinOn)showPinDialog();
+        if(pinOn)showPinDialog(); else handleWidgetActionIfUnlocked();
     }
     void showBiometricPrompt(){
         BiometricManager manager=BiometricManager.from(this);
         if(manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)!=BiometricManager.BIOMETRIC_SUCCESS){showPinDialog();return;}
         BiometricPrompt prompt=new BiometricPrompt(this,ContextCompat.getMainExecutor(this),new BiometricPrompt.AuthenticationCallback(){
-            @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result){super.onAuthenticationSucceeded(result);}
+            @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result){super.onAuthenticationSucceeded(result);handleWidgetActionIfUnlocked();}
             @Override public void onAuthenticationError(int errorCode,CharSequence errString){super.onAuthenticationError(errorCode,errString);showPinDialog();}
         });
         BiometricPrompt.PromptInfo info=new BiometricPrompt.PromptInfo.Builder().setTitle("Meine Finanzen entsperren").setSubtitle("Mit Fingerabdruck anmelden").setNegativeButtonText("Mit PIN fortfahren").build();
@@ -267,7 +273,7 @@ public class MainActivity extends AppCompatActivity {
     void showPinDialog(){
         EditText e=new EditText(this);e.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);e.setHint("PIN");
         new AlertDialog.Builder(this).setTitle("PIN eingeben").setMessage("Bitte PIN zum Öffnen eingeben.").setView(e).setCancelable(false)
-            .setPositiveButton("Entsperren",(d,w)->{if(!e.getText().toString().equals(getPreferences(0).getString("pin",""))){toast("PIN falsch. Bitte App erneut öffnen und nochmals versuchen.");finish();}})
+            .setPositiveButton("Entsperren",(d,w)->{if(!e.getText().toString().equals(getPreferences(0).getString("pin",""))){toast("PIN falsch. Bitte App erneut öffnen und nochmals versuchen.");finish();}else handleWidgetActionIfUnlocked();})
             .setNegativeButton("Beenden",(d,w)->finish()).show();
     }
     void backupDialog(){
