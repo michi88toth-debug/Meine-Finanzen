@@ -8,6 +8,9 @@ import android.database.sqlite.*;
 import android.graphics.*;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.pdf.PdfDocument;
+import android.graphics.pdf.PdfRenderer;
+import android.os.ParcelFileDescriptor;
+import android.provider.OpenableColumns;
 import android.net.Uri;
 import android.text.InputType;
 import android.view.*;
@@ -29,11 +32,11 @@ public class MainActivity extends AppCompatActivity {
     TextView expenses, incomes, balance; ArrayList<String> accounts=new ArrayList<>(); int accountId=-1;
     String[] months={"Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember","Ganzes Jahr"};
     int selectedMonth=Calendar.getInstance().get(Calendar.MONTH)+1, selectedYear=Calendar.getInstance().get(Calendar.YEAR);
-    final int REQ_CSV=11, REQ_PDF=12, REQ_BACKUP=13, REQ_RESTORE=14, REQ_GOOGLE_DRIVE_SETUP=15, REQ_RECEIPT_CAMERA=17, REQ_RECEIPT_PDF=18, REQ_GOOGLE_DRIVE_RESTORE=19;
+    final int REQ_CSV=11, REQ_PDF=12, REQ_BACKUP=13, REQ_RESTORE=14, REQ_GOOGLE_DRIVE_SETUP=15, REQ_RECEIPT_CAMERA=17, REQ_RECEIPT_PDF=18, REQ_GOOGLE_DRIVE_RESTORE=19, REQ_RECEIPT_FILE=20;
     ArrayList<String[]> exportRows=new ArrayList<>();
     boolean needsUnlockOnResume=false;
     final ExecutorService cloudExecutor=Executors.newSingleThreadExecutor();
-    String activeReceiptPath=""; String pendingReceiptCapturePath=""; String pendingReceiptPdfPath=""; TextView receiptCameraButton;
+    String activeReceiptPath=""; String pendingReceiptCapturePath=""; String pendingReceiptPdfPath=""; TextView receiptAddButton;
 
     @Override public void onCreate(Bundle b){super.onCreate(b); getWindow().setStatusBarColor(0xFF126B43); getWindow().setNavigationBarColor(0xFFFFFFFF); getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR); db=new DB(this); ensureAccount(); buildUI(); checkPin();}
 
@@ -111,12 +114,11 @@ public class MainActivity extends AppCompatActivity {
     void entryDialog(boolean income,int[] existing){
         final EditText purpose=new EditText(this),amount=new EditText(this);purpose.setHint("Zweck (optional)");amount.setHint("Betrag in CHF");amount.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
         LinearLayout box=column();box.setPadding(dp(20),dp(8),dp(20),0);
-        LinearLayout purposeRow=row();purposeRow.addView(purpose,new LinearLayout.LayoutParams(0,dp(52),1));
-        receiptCameraButton=text("📷",23,GREEN,true);receiptCameraButton.setGravity(Gravity.CENTER);purposeRow.addView(receiptCameraButton,lp(48,48));
-        receiptCameraButton.setOnClickListener(v->captureReceipt());box.addView(purposeRow);box.addView(amount);activeReceiptPath="";
+        box.addView(purpose);box.addView(amount);activeReceiptPath="";
         final Calendar cal=Calendar.getInstance();final TextView date=text("Datum: "+new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).format(cal.getTime())+"  ✎",15,GREEN,true);date.setPadding(0,dp(14),0,dp(8));box.addView(date);final TextView time=text("Uhrzeit: "+new SimpleDateFormat("HH:mm",Locale.GERMANY).format(cal.getTime())+"  ✎",15,GREEN,true);time.setPadding(0,dp(4),0,dp(8));box.addView(time);
         date.setOnClickListener(v->new DatePickerDialog(this,(view,yy,mm,dd)->{cal.set(yy,mm,dd);date.setText("Datum: "+String.format(Locale.GERMANY,"%02d.%02d.%04d",dd,mm+1,yy)+"  ✎");},cal.get(Calendar.YEAR),cal.get(Calendar.MONTH),cal.get(Calendar.DAY_OF_MONTH)).show());time.setOnClickListener(v->new TimePickerDialog(this,(view,hh,mi)->{cal.set(Calendar.HOUR_OF_DAY,hh);cal.set(Calendar.MINUTE,mi);time.setText("Uhrzeit: "+String.format(Locale.GERMANY,"%02d:%02d",hh,mi)+"  ✎");},cal.get(Calendar.HOUR_OF_DAY),cal.get(Calendar.MINUTE),true).show());
-        if(existing!=null){Cursor e=db.one(existing[0]);if(e.moveToFirst()){purpose.setText(e.getString(1));amount.setText(""+e.getDouble(3));activeReceiptPath=e.getString(5)==null?"":e.getString(5);if(!activeReceiptPath.isEmpty()&&new File(activeReceiptPath).exists())receiptCameraButton.setText("🧾");try{cal.setTime(new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).parse(e.getString(2)));}catch(Exception ignored){}String savedTime=e.getString(6)==null?"00:00":e.getString(6);try{String[] hm=savedTime.split(":");cal.set(Calendar.HOUR_OF_DAY,Integer.parseInt(hm[0]));cal.set(Calendar.MINUTE,Integer.parseInt(hm[1]));}catch(Exception ignored){}date.setText("Datum: "+e.getString(2)+"  ✎");time.setText("Uhrzeit: "+savedTime+"  ✎");}e.close();}
+        receiptAddButton=text("＋  Quittung hinzufügen",14,GREEN,true);receiptAddButton.setPadding(0,dp(10),0,dp(10));box.addView(receiptAddButton);receiptAddButton.setOnClickListener(v->receiptChoiceDialog());
+        if(existing!=null){Cursor e=db.one(existing[0]);if(e.moveToFirst()){purpose.setText(e.getString(1));amount.setText(""+e.getDouble(3));activeReceiptPath=e.getString(5)==null?"":e.getString(5);if(!activeReceiptPath.isEmpty()&&new File(activeReceiptPath).exists())receiptAddButton.setText("🧾  Quittung ändern / hinzufügen");try{cal.setTime(new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).parse(e.getString(2)));}catch(Exception ignored){}String savedTime=e.getString(6)==null?"00:00":e.getString(6);try{String[] hm=savedTime.split(":");cal.set(Calendar.HOUR_OF_DAY,Integer.parseInt(hm[0]));cal.set(Calendar.MINUTE,Integer.parseInt(hm[1]));}catch(Exception ignored){}date.setText("Datum: "+e.getString(2)+"  ✎");time.setText("Uhrzeit: "+savedTime+"  ✎");}e.close();}
         new AlertDialog.Builder(this).setTitle(income?"Einnahme erfassen":"Ausgabe erfassen").setView(box).setNegativeButton("Abbrechen",null).setPositiveButton(existing==null?"Speichern":"Änderungen speichern",(d,w)->{
             String p=purpose.getText().toString().trim();String a=amount.getText().toString().trim().replace(",",".");if(a.isEmpty()){toast("Bitte einen Betrag eingeben.");return;}
             try{double n=Double.parseDouble(a);if(n<=0)throw new Exception();String dt=new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).format(cal.getTime());String tm=new SimpleDateFormat("HH:mm",Locale.GERMANY).format(cal.getTime());if(existing==null)db.addEntry(accountId,p,dt,tm,n,income,activeReceiptPath);else db.updateEntry(existing[0],p,dt,tm,n,income,activeReceiptPath);refresh();}catch(Exception ex){toast("Bitte einen gültigen Betrag eingeben.");}
@@ -126,19 +128,69 @@ public class MainActivity extends AppCompatActivity {
         try{File dir=new File(getFilesDir(),"receipts");if(!dir.exists()&&!dir.mkdirs())throw new IOException("Quittungsordner konnte nicht erstellt werden.");File photo=new File(dir,"receipt_"+System.currentTimeMillis()+".jpg");pendingReceiptCapturePath=photo.getAbsolutePath();Uri uri=androidx.core.content.FileProvider.getUriForFile(this,getPackageName()+".fileprovider",photo);Intent camera=new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);camera.putExtra(android.provider.MediaStore.EXTRA_OUTPUT,uri);camera.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);camera.setClipData(ClipData.newUri(getContentResolver(),"Quittung",uri));if(camera.resolveActivity(getPackageManager())!=null)startActivityForResult(camera,REQ_RECEIPT_CAMERA);else{pendingReceiptCapturePath="";toast("Keine Kamera-App gefunden.");}}catch(Exception e){pendingReceiptCapturePath="";showErrorDialog("Kamera konnte nicht geöffnet werden",e.toString());}
     }
     void compressReceipt(File file)throws Exception{BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;BitmapFactory.decodeFile(file.getAbsolutePath(),bounds);int sample=1;while(bounds.outWidth/sample>2000||bounds.outHeight/sample>2000)sample*=2;BitmapFactory.Options options=new BitmapFactory.Options();options.inSampleSize=sample;Bitmap bitmap=BitmapFactory.decodeFile(file.getAbsolutePath(),options);if(bitmap==null)throw new IOException("Foto konnte nicht gelesen werden.");int max=1800;float scale=Math.min(1f,Math.min((float)max/bitmap.getWidth(),(float)max/bitmap.getHeight()));if(scale<1f){Bitmap scaled=Bitmap.createScaledBitmap(bitmap,Math.round(bitmap.getWidth()*scale),Math.round(bitmap.getHeight()*scale),true);bitmap.recycle();bitmap=scaled;}try(FileOutputStream out=new FileOutputStream(file,false)){if(!bitmap.compress(Bitmap.CompressFormat.JPEG,78,out))throw new IOException("Foto konnte nicht komprimiert werden.");out.flush();}bitmap.recycle();}
-    void showReceipt(String path){try{Bitmap bitmap=BitmapFactory.decodeFile(path);if(bitmap==null)throw new IOException("Quittungsbild kann nicht geöffnet werden.");ImageView image=new ImageView(this);image.setImageBitmap(bitmap);image.setAdjustViewBounds(true);image.setScaleType(ImageView.ScaleType.FIT_CENTER);ScrollView scroll=new ScrollView(this);scroll.addView(image);new AlertDialog.Builder(this).setTitle("Quittung").setView(scroll).setNegativeButton("Schliessen",null).setPositiveButton("Als PDF speichern",(d,w)->{pendingReceiptPdfPath=path;Intent save=new Intent(Intent.ACTION_CREATE_DOCUMENT);save.addCategory(Intent.CATEGORY_OPENABLE);save.setType("application/pdf");save.putExtra(Intent.EXTRA_TITLE,"Quittung.pdf");startActivityForResult(save,REQ_RECEIPT_PDF);}).show();}catch(Exception e){showErrorDialog("Quittung konnte nicht geöffnet werden",e.toString());}}
+    void showReceipt(String path){
+        try{
+            if(path.toLowerCase(Locale.ROOT).endsWith(".pdf")){showReceiptPdf(path);return;}
+            Bitmap bitmap=BitmapFactory.decodeFile(path);if(bitmap==null)throw new IOException("Quittungsbild kann nicht geöffnet werden.");
+            ImageView image=new ImageView(this);image.setImageBitmap(bitmap);image.setAdjustViewBounds(true);image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            ScrollView scroll=new ScrollView(this);scroll.addView(image);
+            new AlertDialog.Builder(this).setTitle("Quittung").setView(scroll).setNegativeButton("Schliessen",null).setPositiveButton("Als PDF speichern",(d,w)->{pendingReceiptPdfPath=path;Intent save=new Intent(Intent.ACTION_CREATE_DOCUMENT);save.addCategory(Intent.CATEGORY_OPENABLE);save.setType("application/pdf");save.putExtra(Intent.EXTRA_TITLE,"Quittung.pdf");startActivityForResult(save,REQ_RECEIPT_PDF);}).show();
+        }catch(Exception e){showErrorDialog("Quittung konnte nicht geöffnet werden",e.toString());}
+    }
+    void showReceiptPdf(String path)throws Exception{
+        ParcelFileDescriptor descriptor=ParcelFileDescriptor.open(new File(path),ParcelFileDescriptor.MODE_READ_ONLY);
+        PdfRenderer renderer=new PdfRenderer(descriptor);LinearLayout pages=column();pages.setPadding(dp(8),dp(8),dp(8),dp(8));
+        for(int i=0;i<renderer.getPageCount();i++){
+            PdfRenderer.Page page=renderer.openPage(i);int width=Math.max(1,page.getWidth()),height=Math.max(1,page.getHeight());
+            float scale=Math.min(1f,900f/width);Bitmap bitmap=Bitmap.createBitmap(Math.max(1,(int)(width*scale)),Math.max(1,(int)(height*scale)),Bitmap.Config.ARGB_8888);
+            page.render(bitmap,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);page.close();
+            ImageView image=new ImageView(this);image.setImageBitmap(bitmap);image.setAdjustViewBounds(true);image.setScaleType(ImageView.ScaleType.FIT_CENTER);LinearLayout.LayoutParams p=lp(-1,-2);p.bottomMargin=dp(8);pages.addView(image,p);
+        }
+        int count=renderer.getPageCount();renderer.close();descriptor.close();ScrollView scroll=new ScrollView(this);scroll.addView(pages);
+        new AlertDialog.Builder(this).setTitle("Quittung (PDF, "+count+" Seite"+(count==1?"":"n")+")").setView(scroll).setPositiveButton("Schliessen",null).show();
+    }
+    void receiptChoiceDialog(){
+        new AlertDialog.Builder(this).setTitle("Quittung hinzufügen").setItems(new String[]{"Fotografieren","Von Gerät"},(d,w)->{if(w==0)captureReceipt();else chooseReceiptFile();}).show();
+    }
+    void chooseReceiptFile(){
+        Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT);pick.addCategory(Intent.CATEGORY_OPENABLE);pick.setType("*/*");pick.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"image/*","application/pdf"});pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivityForResult(pick,REQ_RECEIPT_FILE);
+    }
+    String receiptDisplayName(Uri uri){
+        try(Cursor c=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){if(c!=null&&c.moveToFirst())return c.getString(0);}catch(Exception ignored){}
+        return "Quittung";
+    }
+    void importReceiptFile(Uri uri)throws Exception{
+        String mime=getContentResolver().getType(uri);String name=receiptDisplayName(uri);String lower=(name==null?"":name).toLowerCase(Locale.ROOT);
+        boolean pdf="application/pdf".equalsIgnoreCase(mime)||lower.endsWith(".pdf");
+        boolean image=(mime!=null&&mime.startsWith("image/"))||lower.matches(".*\\.(jpg|jpeg|png|webp|heic|heif|bmp)$");
+        if(!pdf&&!image)throw new IOException("Bitte eine PDF- oder Bilddatei auswählen.");
+        String ext=pdf?".pdf":(lower.matches(".*\\.[a-z0-9]{2,5}$")?lower.substring(lower.lastIndexOf('.')):".jpg");
+        File dir=new File(getFilesDir(),"receipts");if(!dir.exists()&&!dir.mkdirs())throw new IOException("Quittungsordner konnte nicht erstellt werden.");
+        File target=new File(dir,"receipt_import_"+System.currentTimeMillis()+ext);
+        try(InputStream in=getContentResolver().openInputStream(uri);OutputStream out=new FileOutputStream(target)){
+            if(in==null)throw new IOException("Datei konnte nicht geöffnet werden.");byte[] buffer=new byte[8192];int n;while((n=in.read(buffer))!=-1)out.write(buffer,0,n);out.flush();
+        }
+        if(image&&ext.equals(".jpg")){try{compressReceipt(target);}catch(Exception ignored){}}
+        activeReceiptPath=target.getAbsolutePath();if(receiptAddButton!=null)receiptAddButton.setText("🧾  Quittung hinzugefügt");toast("Quittung hinzugefügt.");
+    }
     void writeReceiptPdf(Uri uri)throws Exception{Bitmap bitmap=BitmapFactory.decodeFile(pendingReceiptPdfPath);if(bitmap==null)throw new IOException("Quittungsbild ist nicht verfügbar.");PdfDocument pdf=new PdfDocument();PdfDocument.PageInfo info=new PdfDocument.PageInfo.Builder(595,842,1).create();PdfDocument.Page page=pdf.startPage(info);Canvas canvas=page.getCanvas();Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);float scale=Math.min(535f/bitmap.getWidth(),782f/bitmap.getHeight());float width=bitmap.getWidth()*scale,height=bitmap.getHeight()*scale;float left=(595-width)/2f,top=(842-height)/2f;canvas.drawBitmap(bitmap,null,new RectF(left,top,left+width,top+height),paint);pdf.finishPage(page);try(OutputStream out=getContentResolver().openOutputStream(uri)){if(out==null)throw new IOException("PDF-Datei kann nicht geschrieben werden.");pdf.writeTo(out);}pdf.close();bitmap.recycle();pendingReceiptPdfPath="";toast("Quittung als PDF gespeichert.");}
     byte[] readFileBytes(String path)throws Exception{try(InputStream in=new FileInputStream(path);ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] buffer=new byte[8192];int n;while((n=in.read(buffer))!=-1)out.write(buffer,0,n);return out.toByteArray();}}
     String restoreReceiptImage(String encoded)throws Exception{byte[] bytes=android.util.Base64.decode(encoded,android.util.Base64.DEFAULT);File dir=new File(getFilesDir(),"receipts");if(!dir.exists()&&!dir.mkdirs())throw new IOException("Quittungsordner konnte nicht erstellt werden.");File file=new File(dir,"restored_"+System.currentTimeMillis()+"_"+UUID.randomUUID().toString().substring(0,8)+".jpg");try(FileOutputStream out=new FileOutputStream(file)){out.write(bytes);out.flush();}return file.getAbsolutePath();}
+    String restoreReceiptFile(String encoded,String originalName)throws Exception{
+        byte[] bytes=android.util.Base64.decode(encoded,android.util.Base64.DEFAULT);File dir=new File(getFilesDir(),"receipts");if(!dir.exists()&&!dir.mkdirs())throw new IOException("Quittungsordner konnte nicht erstellt werden.");
+        String ext=".jpg";if(originalName!=null){String n=originalName.toLowerCase(Locale.ROOT);if(n.endsWith(".pdf"))ext=".pdf";else if(n.matches(".*\\.(png|webp|heic|heif|bmp|jpeg)$"))ext=n.substring(n.lastIndexOf('.')); }
+        File file=new File(dir,"restored_"+System.currentTimeMillis()+"_"+UUID.randomUUID().toString().substring(0,8)+ext);try(FileOutputStream out=new FileOutputStream(file)){out.write(bytes);out.flush();}return file.getAbsolutePath();
+    }
     void confirmEdit(int id,String p,String date,double amt,boolean income){
         new AlertDialog.Builder(this).setMessage("Willst du den Eintrag bearbeiten?").setNegativeButton("Nein",null).setPositiveButton("Ja",(d,w)->new AlertDialog.Builder(this).setTitle("Eintrag bearbeiten").setItems(new String[]{"Bearbeiten","Löschen","Abbrechen"},(x,which)->{if(which==0)entryDialog(income,new int[]{id});else if(which==1)new AlertDialog.Builder(this).setMessage("Eintrag wirklich löschen?").setNegativeButton("Nein",null).setPositiveButton("Löschen",(a,b)->{db.deleteEntry(id);refresh();}).show();}).show()).show();
     }
     void exportDialog(){new AlertDialog.Builder(this).setTitle("Exportformat wählen").setItems(new String[]{"PDF (A4)","Excel (CSV)"},(d,w)->{exportRows.clear();Cursor c=db.entries(accountId,selectedMonth,selectedYear);while(c.moveToNext())exportRows.add(new String[]{(c.getString(1)==null||c.getString(1).trim().isEmpty())?"Ohne Zweck":c.getString(1),c.getString(2)+" "+(c.getString(6)==null?"00:00":c.getString(6)),String.format(Locale.US,"%.2f",c.getDouble(3)),c.getInt(4)==1?"Einnahme":"Ausgabe"});c.close();Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType(w==0?"application/pdf":"text/csv");i.putExtra(Intent.EXTRA_TITLE,w==0?"Meine-Finanzen.pdf":"Meine-Finanzen.csv");startActivityForResult(i,w==0?REQ_PDF:REQ_CSV);}).show();}
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
-        if(request==REQ_RECEIPT_CAMERA){if(result==RESULT_OK&&!pendingReceiptCapturePath.isEmpty()){File f=new File(pendingReceiptCapturePath);if(f.exists()&&f.length()>0){try{compressReceipt(f);activeReceiptPath=pendingReceiptCapturePath;if(receiptCameraButton!=null)receiptCameraButton.setText("🧾");toast("Quittung aufgenommen.");}catch(Exception ex){showErrorDialog("Quittung konnte nicht verarbeitet werden",ex.toString());}}else toast("Kein Quittungsfoto erhalten.");}else toast("Fotoaufnahme abgebrochen.");pendingReceiptCapturePath="";return;}
+        if(request==REQ_RECEIPT_CAMERA){if(result==RESULT_OK&&!pendingReceiptCapturePath.isEmpty()){File f=new File(pendingReceiptCapturePath);if(f.exists()&&f.length()>0){try{compressReceipt(f);activeReceiptPath=pendingReceiptCapturePath;if(receiptAddButton!=null)receiptAddButton.setText("🧾  Quittung hinzugefügt");toast("Quittung aufgenommen.");}catch(Exception ex){showErrorDialog("Quittung konnte nicht verarbeitet werden",ex.toString());}}else toast("Kein Quittungsfoto erhalten.");}else toast("Fotoaufnahme abgebrochen.");pendingReceiptCapturePath="";return;}
         if(result!=RESULT_OK||data==null)return;
-        try{Uri u=data.getData();if(request==REQ_CSV)writeCsv(u);else if(request==REQ_PDF)writePdf(u);else if(request==REQ_BACKUP)writeBackup(u);else if(request==REQ_RESTORE)readBackup(u);else if(request==REQ_GOOGLE_DRIVE_SETUP)saveGoogleDriveBackupFile(data);else if(request==REQ_GOOGLE_DRIVE_RESTORE)restoreGoogleDriveBackupFile(data);else if(request==REQ_RECEIPT_PDF)writeReceiptPdf(u);}
+        try{Uri u=data.getData();if(request==REQ_CSV)writeCsv(u);else if(request==REQ_PDF)writePdf(u);else if(request==REQ_BACKUP)writeBackup(u);else if(request==REQ_RESTORE)readBackup(u);else if(request==REQ_GOOGLE_DRIVE_SETUP)saveGoogleDriveBackupFile(data);else if(request==REQ_GOOGLE_DRIVE_RESTORE)restoreGoogleDriveBackupFile(data);else if(request==REQ_RECEIPT_PDF)writeReceiptPdf(u);else if(request==REQ_RECEIPT_FILE)importReceiptFile(u);}
         catch(Exception e){toast("Datei konnte nicht verarbeitet werden: "+e.getMessage());}
     }
     void writeCsv(Uri uri)throws Exception{try(Writer w=new OutputStreamWriter(getContentResolver().openOutputStream(uri),"UTF-8")){w.write("\uFEFFZweck;Datum / Uhrzeit;Betrag CHF;Art\n");for(String[]r:exportRows)w.write(csv(r[0])+";"+r[1]+";"+r[2].replace(".",",")+";"+r[3]+"\n");}toast("Excel-Datei gespeichert.");}
@@ -314,7 +366,7 @@ public class MainActivity extends AppCompatActivity {
         for(String a:db.accounts())aa.put(a);
         Cursor c=db.allEntries();
         while(c.moveToNext()){
-            org.json.JSONObject o=new org.json.JSONObject();o.put("account",c.getString(1));o.put("purpose",c.getString(2));o.put("date",c.getString(3));o.put("time",c.getString(7)==null?"00:00":c.getString(7));o.put("amount",c.getDouble(4));o.put("income",c.getInt(5)==1);String receiptPath=c.getString(6);if(receiptPath!=null&&!receiptPath.isEmpty()&&new File(receiptPath).exists())o.put("receipt_image",android.util.Base64.encodeToString(readFileBytes(receiptPath),android.util.Base64.NO_WRAP));ee.put(o);
+            org.json.JSONObject o=new org.json.JSONObject();o.put("account",c.getString(1));o.put("purpose",c.getString(2));o.put("date",c.getString(3));o.put("time",c.getString(7)==null?"00:00":c.getString(7));o.put("amount",c.getDouble(4));o.put("income",c.getInt(5)==1);String receiptPath=c.getString(6);if(receiptPath!=null&&!receiptPath.isEmpty()&&new File(receiptPath).exists()){File receiptFile=new File(receiptPath);o.put("receipt_file",android.util.Base64.encodeToString(readFileBytes(receiptPath),android.util.Base64.NO_WRAP));o.put("receipt_name",receiptFile.getName());}ee.put(o);
         }
         c.close();org.json.JSONObject root=new org.json.JSONObject();root.put("accounts",aa);root.put("entries",ee);root.put("backup_version",1);root.put("created_at",System.currentTimeMillis());return root.toString(2);
     }
@@ -323,7 +375,7 @@ public class MainActivity extends AppCompatActivity {
         toast("Backup gespeichert.");
     }
     void readBackup(Uri uri)throws Exception{StringBuilder s=new StringBuilder();try(BufferedReader r=new BufferedReader(new InputStreamReader(getContentResolver().openInputStream(uri),"UTF-8"))){String line;while((line=r.readLine())!=null)s.append(line);}restoreBackupJson(s.toString());}
-    void restoreBackupJson(String json)throws Exception{org.json.JSONObject j=new org.json.JSONObject(json);org.json.JSONArray aa=j.getJSONArray("accounts"),ee=j.getJSONArray("entries");db.clearAll();for(int i=0;i<aa.length();i++)db.addAccount(aa.getString(i));for(int i=0;i<ee.length();i++){org.json.JSONObject o=ee.getJSONObject(i);int aid=db.accountId(o.getString("account"));if(aid>0){String receiptPath="";String image=o.optString("receipt_image","");if(!image.isEmpty())receiptPath=restoreReceiptImage(image);db.addEntry(aid,o.optString("purpose",""),o.getString("date"),o.optString("time","00:00"),o.getDouble("amount"),o.getBoolean("income"),receiptPath);}}ensureAccount();accountId=-1;reloadAccounts();refresh();toast("Backup wiederhergestellt.");}
+    void restoreBackupJson(String json)throws Exception{org.json.JSONObject j=new org.json.JSONObject(json);org.json.JSONArray aa=j.getJSONArray("accounts"),ee=j.getJSONArray("entries");db.clearAll();for(int i=0;i<aa.length();i++)db.addAccount(aa.getString(i));for(int i=0;i<ee.length();i++){org.json.JSONObject o=ee.getJSONObject(i);int aid=db.accountId(o.getString("account"));if(aid>0){String receiptPath="";String fileData=o.optString("receipt_file","");if(!fileData.isEmpty())receiptPath=restoreReceiptFile(fileData,o.optString("receipt_name","Quittung"));else{String image=o.optString("receipt_image","");if(!image.isEmpty())receiptPath=restoreReceiptImage(image);}db.addEntry(aid,o.optString("purpose",""),o.getString("date"),o.optString("time","00:00"),o.getDouble("amount"),o.getBoolean("income"),receiptPath);}}ensureAccount();accountId=-1;reloadAccounts();refresh();toast("Backup wiederhergestellt.");}
     void showErrorDialog(String title,String detail){TextView message=text(detail,14,DARK,false);message.setTextIsSelectable(true);message.setPadding(dp(16),dp(12),dp(16),dp(12));ScrollView scroll=new ScrollView(this);scroll.addView(message);new AlertDialog.Builder(this).setTitle(title).setView(scroll).setNeutralButton("Fehler kopieren",(d,w)->{android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);clipboard.setPrimaryClip(ClipData.newPlainText("Fehlermeldung",detail));toast("Fehlermeldung kopiert.");}).setPositiveButton("Schliessen",null).show();}
     void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
 
