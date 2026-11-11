@@ -40,7 +40,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override public void onCreate(Bundle b){super.onCreate(b); getWindow().setStatusBarColor(0xFF126B43); getWindow().setNavigationBarColor(0xFFFFFFFF); getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR); db=new DB(this); ensureAccount(); buildUI(); checkPin();}
 
-    @Override protected void onStop(){super.onStop();needsUnlockOnResume=true;saveAutomaticBackup();}
+    @Override protected void onStop(){super.onStop();needsUnlockOnResume=true;scheduleAutomaticBackup();}
     @Override protected void onResume(){super.onResume();updatePeriodToCurrent();if(needsUnlockOnResume){needsUnlockOnResume=false;checkPin();}}
     void updatePeriodToCurrent(){
         Calendar now=Calendar.getInstance();int month=now.get(Calendar.MONTH)+1,year=now.get(Calendar.YEAR);
@@ -121,7 +121,7 @@ public class MainActivity extends AppCompatActivity {
         if(existing!=null){Cursor e=db.one(existing[0]);if(e.moveToFirst()){purpose.setText(e.getString(1));amount.setText(""+e.getDouble(3));activeReceiptPath=e.getString(5)==null?"":e.getString(5);if(!activeReceiptPath.isEmpty()&&new File(activeReceiptPath).exists())receiptAddButton.setText("🧾  Quittung ändern / hinzufügen");try{cal.setTime(new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).parse(e.getString(2)));}catch(Exception ignored){}String savedTime=e.getString(6)==null?"00:00":e.getString(6);try{String[] hm=savedTime.split(":");cal.set(Calendar.HOUR_OF_DAY,Integer.parseInt(hm[0]));cal.set(Calendar.MINUTE,Integer.parseInt(hm[1]));}catch(Exception ignored){}date.setText("Datum: "+e.getString(2)+"  ✎");time.setText("Uhrzeit: "+savedTime+"  ✎");}e.close();}
         new AlertDialog.Builder(this).setTitle(income?"Einnahme erfassen":"Ausgabe erfassen").setView(box).setNegativeButton("Abbrechen",null).setPositiveButton(existing==null?"Speichern":"Änderungen speichern",(d,w)->{
             String p=purpose.getText().toString().trim();String a=amount.getText().toString().trim().replace(",",".");if(a.isEmpty()){toast("Bitte einen Betrag eingeben.");return;}
-            try{double n=Double.parseDouble(a);if(n<=0)throw new Exception();String dt=new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).format(cal.getTime());String tm=new SimpleDateFormat("HH:mm",Locale.GERMANY).format(cal.getTime());if(existing==null)db.addEntry(accountId,p,dt,tm,n,income,activeReceiptPath);else db.updateEntry(existing[0],p,dt,tm,n,income,activeReceiptPath);refresh();}catch(Exception ex){toast("Bitte einen gültigen Betrag eingeben.");}
+            try{double n=Double.parseDouble(a);if(n<=0)throw new Exception();String dt=new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).format(cal.getTime());String tm=new SimpleDateFormat("HH:mm",Locale.GERMANY).format(cal.getTime());if(existing==null)db.addEntry(accountId,p,dt,tm,n,income,activeReceiptPath);else db.updateEntry(existing[0],p,dt,tm,n,income,activeReceiptPath);refresh();scheduleAutomaticBackup();}catch(Exception ex){toast("Bitte einen gültigen Betrag eingeben.");}
         }).show();
     }
     void captureReceipt(){
@@ -332,6 +332,10 @@ public class MainActivity extends AppCompatActivity {
             toast("Google-Drive-Backup übernommen. Künftige Sicherungen erfolgen automatisch.");
         }catch(Exception e){showErrorDialog("Google-Drive-Backup konnte nicht wiederhergestellt werden",e.toString());}
     }
+    void scheduleAutomaticBackup(){
+        try{cloudExecutor.execute(()->saveAutomaticBackup());}
+        catch(Exception e){android.util.Log.e("MeineFinanzen","Automatische Sicherung konnte nicht eingeplant werden",e);}
+    }
     void saveAutomaticBackup(){
         try{
             String json=backupJson();
@@ -346,7 +350,7 @@ public class MainActivity extends AppCompatActivity {
                     getPreferences(0).edit().putString("google_drive_backup_fingerprint",fingerprint).apply();
                 }
             }
-        }catch(Exception e){android.util.Log.e("MeineFinanzen","Automatisches Backup fehlgeschlagen",e);toast("Automatisches Backup fehlgeschlagen. Bitte Google-Drive-Verbindung prüfen.");}
+        }catch(Exception e){android.util.Log.e("MeineFinanzen","Automatisches Backup fehlgeschlagen",e);runOnUiThread(()->toast("Automatisches Backup fehlgeschlagen. Bitte Google-Drive-Verbindung prüfen."));}
     }
     String backupFingerprint(String json)throws Exception{
         org.json.JSONObject data=new org.json.JSONObject(json);
