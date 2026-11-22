@@ -95,8 +95,21 @@ public class MainActivity extends AppCompatActivity {
     void reloadAccounts(){accounts=db.accounts();ArrayAdapter<String>a=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,accounts);accountSpin.setAdapter(a);String savedName=getPreferences(0).getString("last_account_name","");String wanted=savedName;if(accountId>0){String current=db.accountName(accountId);if(!current.isEmpty())wanted=current;}int initial=accounts.indexOf(wanted);if(initial<0)initial=0;accountSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){if(pos>=0&&pos<accounts.size()){String name=accounts.get(pos);accountId=db.accountId(name);getPreferences(0).edit().putString("last_account_name",name).apply();refresh();}}});if(!accounts.isEmpty())accountSpin.setSelection(initial);else accountId=-1;}
     void refresh(){
         if(list==null)return;list.removeAllViews();if(accountId<0&& !accounts.isEmpty())accountId=db.accountId(accounts.get(0));
-        double inc=0,exp=0;Cursor c=db.entries(accountId,selectedMonth,selectedYear);
-        if(c.getCount()==0){TextView empty=text("Noch keine Einträge in diesem Zeitraum.",14,0xFF77847D,false);empty.setGravity(Gravity.CENTER);empty.setPadding(0,dp(35),0,dp(35));list.addView(empty);}
+        double inc=0,exp=0,transfer=0;
+        if(selectedMonth>0){
+            transfer=db.balanceBeforeMonth(accountId,selectedYear,selectedMonth);
+            Calendar previous=Calendar.getInstance();previous.set(selectedYear,selectedMonth-2,1);
+            String previousLabel=months[previous.get(Calendar.MONTH)];
+            if(selectedMonth==1)previousLabel+=" "+previous.get(Calendar.YEAR);
+            LinearLayout transferCard=row();transferCard.setBackground(shape(0xFFEAF1FA,12));transferCard.setPadding(dp(12),dp(12),dp(12),dp(12));
+            LinearLayout.LayoutParams transferParams=lp(-1,-2);transferParams.bottomMargin=dp(8);list.addView(transferCard,transferParams);
+            View transferStripe=new View(this);transferStripe.setBackgroundColor(BLUE);transferCard.addView(transferStripe,lp(4,42));
+            TextView transferLabel=text("Übertrag Saldo ("+previousLabel+")",14,DARK,true);
+            LinearLayout.LayoutParams transferTextParams=new LinearLayout.LayoutParams(0,-2,1);transferTextParams.leftMargin=dp(10);transferCard.addView(transferLabel,transferTextParams);
+            transferCard.addView(text(money(transfer),15,BLUE,true));
+        }
+        Cursor c=db.entries(accountId,selectedMonth,selectedYear);
+        if(c.getCount()==0&&selectedMonth==0){TextView empty=text("Noch keine Einträge in diesem Zeitraum.",14,0xFF77847D,false);empty.setGravity(Gravity.CENTER);empty.setPadding(0,dp(35),0,dp(35));list.addView(empty);}
         while(c.moveToNext()){
             int id=c.getInt(0);String purpose=c.getString(1),date=c.getString(2);double amount=c.getDouble(3);boolean income=c.getInt(4)==1;
             if(income)inc+=amount;else exp+=amount;
@@ -185,7 +198,7 @@ public class MainActivity extends AppCompatActivity {
     void confirmEdit(int id,String p,String date,double amt,boolean income){
         new AlertDialog.Builder(this).setMessage("Willst du den Eintrag bearbeiten?").setNegativeButton("Nein",null).setPositiveButton("Ja",(d,w)->new AlertDialog.Builder(this).setTitle("Eintrag bearbeiten").setItems(new String[]{"Bearbeiten","Löschen","Abbrechen"},(x,which)->{if(which==0)entryDialog(income,new int[]{id});else if(which==1)new AlertDialog.Builder(this).setMessage("Eintrag wirklich löschen?").setNegativeButton("Nein",null).setPositiveButton("Löschen",(a,b)->{db.deleteEntry(id);refresh();}).show();}).show()).show();
     }
-    void exportDialog(){new AlertDialog.Builder(this).setTitle("Exportformat wählen").setItems(new String[]{"PDF (A4)","Excel (CSV)"},(d,w)->{exportRows.clear();Cursor c=db.entries(accountId,selectedMonth,selectedYear);while(c.moveToNext())exportRows.add(new String[]{(c.getString(1)==null||c.getString(1).trim().isEmpty())?"Ohne Zweck":c.getString(1),c.getString(2)+" "+(c.getString(6)==null?"00:00":c.getString(6)),String.format(Locale.US,"%.2f",c.getDouble(3)),c.getInt(4)==1?"Einnahme":"Ausgabe"});c.close();Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType(w==0?"application/pdf":"text/csv");i.putExtra(Intent.EXTRA_TITLE,w==0?"Meine-Finanzen.pdf":"Meine-Finanzen.csv");startActivityForResult(i,w==0?REQ_PDF:REQ_CSV);}).show();}
+    void exportDialog(){new AlertDialog.Builder(this).setTitle("Exportformat wählen").setItems(new String[]{"PDF (A4)","Excel (CSV)"},(d,w)->{exportRows.clear();if(selectedMonth>0){double transfer=db.balanceBeforeMonth(accountId,selectedYear,selectedMonth);Calendar previous=Calendar.getInstance();previous.set(selectedYear,selectedMonth-2,1);String label=months[previous.get(Calendar.MONTH)];if(selectedMonth==1)label+=" "+previous.get(Calendar.YEAR);exportRows.add(new String[]{"Übertrag Saldo ("+label+")","",String.format(Locale.US,"%.2f",transfer),"Übertrag"});}Cursor c=db.entries(accountId,selectedMonth,selectedYear);while(c.moveToNext())exportRows.add(new String[]{(c.getString(1)==null||c.getString(1).trim().isEmpty())?"Ohne Zweck":c.getString(1),c.getString(2)+" "+(c.getString(6)==null?"00:00":c.getString(6)),String.format(Locale.US,"%.2f",c.getDouble(3)),c.getInt(4)==1?"Einnahme":"Ausgabe"});c.close();Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType(w==0?"application/pdf":"text/csv");i.putExtra(Intent.EXTRA_TITLE,w==0?"Meine-Finanzen.pdf":"Meine-Finanzen.csv");startActivityForResult(i,w==0?REQ_PDF:REQ_CSV);}).show();}
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
         if(request==REQ_RECEIPT_CAMERA){if(result==RESULT_OK&&!pendingReceiptCapturePath.isEmpty()){File f=new File(pendingReceiptCapturePath);if(f.exists()&&f.length()>0){try{compressReceipt(f);activeReceiptPath=pendingReceiptCapturePath;if(receiptAddButton!=null)receiptAddButton.setText("🧾  Quittung hinzugefügt");toast("Quittung aufgenommen.");}catch(Exception ex){showErrorDialog("Quittung konnte nicht verarbeitet werden",ex.toString());}}else toast("Kein Quittungsfoto erhalten.");}else toast("Fotoaufnahme abgebrochen.");pendingReceiptCapturePath="";return;}
@@ -202,8 +215,8 @@ public class MainActivity extends AppCompatActivity {
         for(String[]r:exportRows){
             if(y>770){pdf.finishPage(page);pageNumber++;pi=new PdfDocument.PageInfo.Builder(595,842,pageNumber).create();page=pdf.startPage(pi);c=page.getCanvas();y=55;}
             p.setColor(DARK);p.setTextSize(12);c.drawText(r[0].length()>42?r[0].substring(0,39)+"...":r[0],38,y,p);c.drawText(r[1],330,y,p);
-            int amountColor=r[3].equals("Einnahme")?GREEN:RED;
-            p.setColor(r[3].equals("Einnahme")?0xFFE3F3E8:0xFFFBE5E7);
+            int amountColor=r[3].equals("Einnahme")?GREEN:(r[3].equals("Übertrag")?BLUE:RED);
+            p.setColor(r[3].equals("Einnahme")?0xFFE3F3E8:(r[3].equals("Übertrag")?0xFFEAF1FA:0xFFFBE5E7));
             c.drawRoundRect(432,y-16,558,y+5,7,7,p);
             p.setColor(amountColor);p.setFakeBoldText(true);c.drawText(r[2],440,y,p);p.setFakeBoldText(false);y+=24;
         }
@@ -396,6 +409,12 @@ public class MainActivity extends AppCompatActivity {
         String accountName(int id){try(Cursor c=getReadableDatabase().rawQuery("SELECT name FROM accounts WHERE id=?",new String[]{""+id})){return c.moveToFirst()?c.getString(0):"";}}
         int countAccounts(){try(Cursor c=getReadableDatabase().rawQuery("SELECT COUNT(*) FROM accounts",null)){return c.moveToFirst()?c.getInt(0):0;}}
         double accountBalance(int id){try(Cursor c=getReadableDatabase().rawQuery("SELECT COALESCE(SUM(CASE WHEN income=1 THEN amount ELSE -amount END),0) FROM entries WHERE account_id=?",new String[]{""+id})){return c.moveToFirst()?c.getDouble(0):0;}}
+        double balanceBeforeMonth(int id,int year,int month){
+            Calendar first=Calendar.getInstance();first.clear();first.set(year,month-1,1);
+            String cutoff=String.format(Locale.US,"%04d%02d%02d",year,month,1);
+            String sql="SELECT COALESCE(SUM(CASE WHEN income=1 THEN amount ELSE -amount END),0) FROM entries WHERE account_id=? AND (substr(date,7,4)||substr(date,4,2)||substr(date,1,2))<?";
+            try(Cursor c=getReadableDatabase().rawQuery(sql,new String[]{String.valueOf(id),cutoff})){return c.moveToFirst()?c.getDouble(0):0;}
+        }
         void addEntry(int id,String p,String date,String time,double amount,boolean income,String receipt){getWritableDatabase().execSQL("INSERT INTO entries(account_id,purpose,date,amount,income,receipt_path,entry_time) VALUES(?,?,?,?,?,?,?)",new Object[]{id,p,date,amount,income?1:0,receipt,time});}
         void updateEntry(int id,String p,String date,String time,double amount,boolean income,String receipt){getWritableDatabase().execSQL("UPDATE entries SET purpose=?,date=?,amount=?,income=?,receipt_path=?,entry_time=? WHERE id=?",new Object[]{p,date,amount,income?1:0,receipt,time,id});}
         void deleteEntry(int id){getWritableDatabase().execSQL("DELETE FROM entries WHERE id=?",new Object[]{id});}
