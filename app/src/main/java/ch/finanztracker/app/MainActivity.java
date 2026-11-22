@@ -225,10 +225,24 @@ public class MainActivity extends AppCompatActivity {
         p.setColor(BLUE);p.setTextSize(13);p.setFakeBoldText(true);String saldoText="Aktueller Saldo: "+money(currentBalance);float saldoWidth=p.measureText(saldoText);c.drawText(saldoText,550-saldoWidth,812,p);p.setFakeBoldText(false);
         pdf.finishPage(page);try(OutputStream o=getContentResolver().openOutputStream(uri)){pdf.writeTo(o);}pdf.close();toast("PDF im A4-Format gespeichert.");
     }
-    void menu(){String[]opts={"Konten verwalten","Meine Fixkosten","Sicherheit","Datensicherung","Abbrechen"};new AlertDialog.Builder(this).setTitle("Menü").setItems(opts,(d,w)->{if(w==0)accountsDialog();if(w==1)fixedCostsDialog();if(w==2)securityDialog();if(w==3)backupDialog();}).show();}
+    void menu(){
+        LinearLayout panel=column();panel.setPadding(dp(16),dp(12),dp(16),dp(12));panel.setBackground(shape(BG,24));
+        TextView heading=text("Meine Finanzen",20,DARK,true);heading.setPadding(dp(6),dp(4),dp(6),dp(12));panel.addView(heading);
+        String[] titles={"Konten verwalten","Meine Fixkosten","Sicherheit","Datensicherung"};
+        String[] subtitles={"Konten hinzufügen, umbenennen oder löschen","Fixkosten für das ausgewählte Konto","PIN und Fingerabdruck verwalten","Backup speichern oder wiederherstellen"};
+        String[] icons={"▣","↻","⌑","☁"};int[] colors={0xFFE4F2E9,0xFFEAF1FA,0xFFFFF2DF,0xFFEDE8F8};
+        AlertDialog dialog=new AlertDialog.Builder(this).setView(panel).create();
+        for(int i=0;i<titles.length;i++){final int action=i;LinearLayout item=row();item.setBackground(shape(0xFFFFFFFF,18));item.setPadding(dp(12),dp(11),dp(12),dp(11));LinearLayout.LayoutParams itemParams=lp(-1,-2);itemParams.bottomMargin=dp(9);panel.addView(item,itemParams);
+            TextView symbol=text(icons[i],22,DARK,true);symbol.setGravity(Gravity.CENTER);symbol.setBackground(shape(colors[i],30));item.addView(symbol,lp(44,44));
+            LinearLayout details=column();LinearLayout.LayoutParams detailParams=new LinearLayout.LayoutParams(0,-2,1);detailParams.leftMargin=dp(12);item.addView(details,detailParams);details.addView(text(titles[i],15,DARK,true));details.addView(text(subtitles[i],12,0xFF718078,false));item.addView(text("›",25,0xFF718078,false));
+            item.setOnClickListener(v->{dialog.dismiss();if(action==0)accountsDialog();else if(action==1)fixedCostsDialog();else if(action==2)securityDialog();else backupDialog();});
+        }
+        Button close=button("Schliessen",0xFF68756E);panel.addView(close,lp(-1,46));close.setOnClickListener(v->dialog.dismiss());dialog.show();
+    }
 
     void fixedCostsDialog(){
         LinearLayout content=column();content.setPadding(dp(18),dp(8),dp(18),dp(8));
+        TextView accountLabel=text("Fixkosten für: "+db.accountName(accountId),14,GREEN,true);accountLabel.setPadding(dp(4),dp(4),dp(4),dp(10));content.addView(accountLabel);
         LinearLayout items=column();ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.addView(items);content.addView(scroll,lp(-1,220));
         EditText purpose=new EditText(this),amount=new EditText(this);purpose.setHint("Bezeichnung");amount.setHint("Betrag in CHF");amount.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
         Spinner type=new Spinner(this);type.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Ausgabe","Einnahme"}));
@@ -237,7 +251,7 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout.LayoutParams bp=lp(0,44);bp.weight=1;bp.rightMargin=dp(5);buttons.addView(add,bp);LinearLayout.LayoutParams cp=lp(0,44);cp.weight=1;cp.leftMargin=dp(5);buttons.addView(close,cp);
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Meine Fixkosten").setView(content).create();
         Runnable reload=()->{
-            items.removeAllViews();Cursor c=db.fixedCosts();boolean any=false;
+            items.removeAllViews();Cursor c=db.fixedCosts(accountId);boolean any=false;
             while(c.moveToNext()){any=true;int id=c.getInt(0);String name=c.getString(1);double value=c.getDouble(2);boolean income=c.getInt(3)==1;
                 LinearLayout item=column();item.setPadding(dp(10),dp(8),dp(10),dp(8));item.setBackground(shape(0xFFFFFFFF,10));
                 TextView title=text(name,16,DARK,true);TextView sub=text(money(value)+" · "+(income?"Einnahme":"Ausgabe"),13,income?GREEN:RED,false);item.addView(title);item.addView(sub);
@@ -247,7 +261,7 @@ public class MainActivity extends AppCompatActivity {
         reload.run();
         add.setOnClickListener(v->{String p=purpose.getText().toString().trim(),raw=amount.getText().toString().trim().replace(",",".");
             if(p.isEmpty()||raw.isEmpty()){toast("Bitte Bezeichnung und Betrag eingeben.");return;}
-            try{double value=Double.parseDouble(raw);if(value<=0)throw new NumberFormatException();db.addFixedCost(p,value,type.getSelectedItemPosition()==1);scheduleAutomaticBackup();purpose.setText("");amount.setText("");type.setSelection(0);reload.run();toast("Fixkosten gespeichert.");}
+            try{double value=Double.parseDouble(raw);if(value<=0)throw new NumberFormatException();db.addFixedCost(accountId,p,value,type.getSelectedItemPosition()==1);scheduleAutomaticBackup();purpose.setText("");amount.setText("");type.setSelection(0);reload.run();toast("Fixkosten gespeichert.");}
             catch(Exception ex){toast("Bitte einen gültigen Betrag eingeben.");}
         });
         close.setOnClickListener(v->dialog.dismiss());dialog.show();
@@ -256,18 +270,18 @@ public class MainActivity extends AppCompatActivity {
         EditText purpose=new EditText(this),amount=new EditText(this);purpose.setHint("Bezeichnung");amount.setHint("Betrag in CHF");amount.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
         Spinner type=new Spinner(this);type.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Ausgabe","Einnahme"}));
         LinearLayout box=column();box.setPadding(dp(20),dp(8),dp(20),0);box.addView(purpose);box.addView(amount);box.addView(type);
-        try(Cursor c=db.fixedCosts()){while(c.moveToNext())if(c.getInt(0)==id){purpose.setText(c.getString(1));amount.setText(String.valueOf(c.getDouble(2)));type.setSelection(c.getInt(3)==1?1:0);break;}}
+        try(Cursor c=db.fixedCost(id)){while(c.moveToNext())if(c.getInt(0)==id){purpose.setText(c.getString(1));amount.setText(String.valueOf(c.getDouble(2)));type.setSelection(c.getInt(3)==1?1:0);break;}}
         new AlertDialog.Builder(this).setTitle("Fixkosten bearbeiten").setView(box).setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{
             String p=purpose.getText().toString().trim(),raw=amount.getText().toString().trim().replace(",",".");try{double value=Double.parseDouble(raw);if(p.isEmpty()||value<=0)throw new NumberFormatException();db.updateFixedCost(id,p,value,type.getSelectedItemPosition()==1);scheduleAutomaticBackup();toast("Fixkosten gespeichert.");}catch(Exception ex){toast("Bitte Bezeichnung und gültigen Betrag eingeben.");}
         }).setNeutralButton("Löschen",(d,w)->new AlertDialog.Builder(this).setMessage("Diese Fixkosten löschen?").setNegativeButton("Abbrechen",null).setPositiveButton("Löschen",(a,b)->{db.deleteFixedCost(id);scheduleAutomaticBackup();toast("Fixkosten gelöscht.");}).show()).show();
     }
     void insertFixedCosts(){
         if(accountId<0){toast("Bitte zuerst ein Konto auswählen.");return;}
-        try(Cursor c=db.fixedCosts()){if(!c.moveToFirst()){toast("Es sind noch keine Fixkosten gespeichert.");return;}}
+        try(Cursor c=db.fixedCosts(accountId)){if(!c.moveToFirst()){toast("Für dieses Konto sind noch keine Fixkosten gespeichert.");return;}}
         Calendar cal=Calendar.getInstance();
         new DatePickerDialog(this,(view,yy,mm,dd)->{
             String date=String.format(Locale.GERMANY,"%02d.%02d.%04d",dd,mm+1,yy);int count=0;
-            try(Cursor c=db.fixedCosts()){while(c.moveToNext()){db.addEntry(accountId,c.getString(1),date,"00:00",c.getDouble(2),c.getInt(3)==1,"");count++;}}
+            try(Cursor c=db.fixedCosts(accountId)){while(c.moveToNext()){db.addEntry(accountId,c.getString(1),date,"00:00",c.getDouble(2),c.getInt(3)==1,"");count++;}}
             refresh();scheduleAutomaticBackup();toast(count+" Fixkosten für den "+date+" eingefügt.");
         },cal.get(Calendar.YEAR),cal.get(Calendar.MONTH),cal.get(Calendar.DAY_OF_MONTH)).show();
     }
@@ -430,30 +444,30 @@ public class MainActivity extends AppCompatActivity {
         while(c.moveToNext()){
             org.json.JSONObject o=new org.json.JSONObject();o.put("account",c.getString(1));o.put("purpose",c.getString(2));o.put("date",c.getString(3));o.put("time",c.getString(7)==null?"00:00":c.getString(7));o.put("amount",c.getDouble(4));o.put("income",c.getInt(5)==1);String receiptPath=c.getString(6);if(receiptPath!=null&&!receiptPath.isEmpty()&&new File(receiptPath).exists()){File receiptFile=new File(receiptPath);o.put("receipt_file",android.util.Base64.encodeToString(readFileBytes(receiptPath),android.util.Base64.NO_WRAP));o.put("receipt_name",receiptFile.getName());}ee.put(o);
         }
-        c.close();Cursor fc=db.fixedCosts();while(fc.moveToNext()){org.json.JSONObject o=new org.json.JSONObject();o.put("purpose",fc.getString(1));o.put("amount",fc.getDouble(2));o.put("income",fc.getInt(3)==1);ff.put(o);}fc.close();org.json.JSONObject root=new org.json.JSONObject();root.put("accounts",aa);root.put("entries",ee);root.put("fixed_costs",ff);root.put("backup_version",2);root.put("created_at",System.currentTimeMillis());return root.toString(2);
+        c.close();Cursor fc=db.allFixedCosts();while(fc.moveToNext()){org.json.JSONObject o=new org.json.JSONObject();o.put("account",db.accountName(fc.getInt(4)));o.put("purpose",fc.getString(1));o.put("amount",fc.getDouble(2));o.put("income",fc.getInt(3)==1);ff.put(o);}fc.close();org.json.JSONObject root=new org.json.JSONObject();root.put("accounts",aa);root.put("entries",ee);root.put("fixed_costs",ff);root.put("backup_version",2);root.put("created_at",System.currentTimeMillis());return root.toString(2);
     }
     void writeBackup(Uri uri)throws Exception{
         try(Writer w=new OutputStreamWriter(getContentResolver().openOutputStream(uri),"UTF-8")){w.write(backupJson());}
         toast("Backup gespeichert.");
     }
     void readBackup(Uri uri)throws Exception{StringBuilder s=new StringBuilder();try(BufferedReader r=new BufferedReader(new InputStreamReader(getContentResolver().openInputStream(uri),"UTF-8"))){String line;while((line=r.readLine())!=null)s.append(line);}restoreBackupJson(s.toString());}
-    void restoreBackupJson(String json)throws Exception{org.json.JSONObject j=new org.json.JSONObject(json);org.json.JSONArray aa=j.getJSONArray("accounts"),ee=j.getJSONArray("entries"),ff=j.optJSONArray("fixed_costs");db.clearAll();db.clearFixedCosts();for(int i=0;i<aa.length();i++)db.addAccount(aa.getString(i));for(int i=0;i<ee.length();i++){org.json.JSONObject o=ee.getJSONObject(i);int aid=db.accountId(o.getString("account"));if(aid>0){String receiptPath="";String fileData=o.optString("receipt_file","");if(!fileData.isEmpty())receiptPath=restoreReceiptFile(fileData,o.optString("receipt_name","Quittung"));else{String image=o.optString("receipt_image","");if(!image.isEmpty())receiptPath=restoreReceiptImage(image);}db.addEntry(aid,o.optString("purpose",""),o.getString("date"),o.optString("time","00:00"),o.getDouble("amount"),o.getBoolean("income"),receiptPath);}}if(ff!=null)for(int i=0;i<ff.length();i++){org.json.JSONObject o=ff.getJSONObject(i);db.addFixedCost(o.optString("purpose",""),o.getDouble("amount"),o.optBoolean("income",false));}ensureAccount();accountId=-1;reloadAccounts();refresh();scheduleAutomaticBackup();toast("Backup wiederhergestellt.");}
+    void restoreBackupJson(String json)throws Exception{org.json.JSONObject j=new org.json.JSONObject(json);org.json.JSONArray aa=j.getJSONArray("accounts"),ee=j.getJSONArray("entries"),ff=j.optJSONArray("fixed_costs");db.clearAll();db.clearFixedCosts();for(int i=0;i<aa.length();i++)db.addAccount(aa.getString(i));for(int i=0;i<ee.length();i++){org.json.JSONObject o=ee.getJSONObject(i);int aid=db.accountId(o.getString("account"));if(aid>0){String receiptPath="";String fileData=o.optString("receipt_file","");if(!fileData.isEmpty())receiptPath=restoreReceiptFile(fileData,o.optString("receipt_name","Quittung"));else{String image=o.optString("receipt_image","");if(!image.isEmpty())receiptPath=restoreReceiptImage(image);}db.addEntry(aid,o.optString("purpose",""),o.getString("date"),o.optString("time","00:00"),o.getDouble("amount"),o.getBoolean("income"),receiptPath);}}if(ff!=null)for(int i=0;i<ff.length();i++){org.json.JSONObject o=ff.getJSONObject(i);String account=o.optString("account",aa.length()>0?aa.getString(0):"");int fixedAccountId=db.accountId(account);if(fixedAccountId>0)db.addFixedCost(fixedAccountId,o.optString("purpose",""),o.getDouble("amount"),o.optBoolean("income",false));}ensureAccount();accountId=-1;reloadAccounts();refresh();scheduleAutomaticBackup();toast("Backup wiederhergestellt.");}
     void showErrorDialog(String title,String detail){TextView message=text(detail,14,DARK,false);message.setTextIsSelectable(true);message.setPadding(dp(16),dp(12),dp(16),dp(12));ScrollView scroll=new ScrollView(this);scroll.addView(message);new AlertDialog.Builder(this).setTitle(title).setView(scroll).setNeutralButton("Fehler kopieren",(d,w)->{android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);clipboard.setPrimaryClip(ClipData.newPlainText("Fehlermeldung",detail));toast("Fehlermeldung kopiert.");}).setPositiveButton("Schliessen",null).show();}
     void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
 
     static class DB extends SQLiteOpenHelper{
-        DB(Context c){super(c,"finanzen.db",null,4);}
-        public void onCreate(SQLiteDatabase d){d.execSQL("CREATE TABLE accounts(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE)");d.execSQL("CREATE TABLE entries(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER,purpose TEXT,date TEXT,amount REAL,income INTEGER,receipt_path TEXT,entry_time TEXT DEFAULT '00:00')");d.execSQL("CREATE TABLE fixed_costs(id INTEGER PRIMARY KEY AUTOINCREMENT,purpose TEXT,amount REAL,income INTEGER)");}
-        public void onUpgrade(SQLiteDatabase d,int a,int b){if(a<2)d.execSQL("ALTER TABLE entries ADD COLUMN receipt_path TEXT");if(a<3)d.execSQL("ALTER TABLE entries ADD COLUMN entry_time TEXT DEFAULT '00:00'");if(a<4)d.execSQL("CREATE TABLE fixed_costs(id INTEGER PRIMARY KEY AUTOINCREMENT,purpose TEXT,amount REAL,income INTEGER)");}
+        DB(Context c){super(c,"finanzen.db",null,5);}
+        public void onCreate(SQLiteDatabase d){d.execSQL("CREATE TABLE accounts(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE)");d.execSQL("CREATE TABLE entries(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER,purpose TEXT,date TEXT,amount REAL,income INTEGER,receipt_path TEXT,entry_time TEXT DEFAULT '00:00')");d.execSQL("CREATE TABLE fixed_costs(id INTEGER PRIMARY KEY AUTOINCREMENT,purpose TEXT,amount REAL,income INTEGER,account_id INTEGER)");}
+        public void onUpgrade(SQLiteDatabase d,int a,int b){if(a<2)d.execSQL("ALTER TABLE entries ADD COLUMN receipt_path TEXT");if(a<3)d.execSQL("ALTER TABLE entries ADD COLUMN entry_time TEXT DEFAULT '00:00'");if(a<4)d.execSQL("CREATE TABLE fixed_costs(id INTEGER PRIMARY KEY AUTOINCREMENT,purpose TEXT,amount REAL,income INTEGER)");if(a<5){d.execSQL("ALTER TABLE fixed_costs ADD COLUMN account_id INTEGER");d.execSQL("UPDATE fixed_costs SET account_id=(SELECT id FROM accounts ORDER BY id LIMIT 1) WHERE account_id IS NULL");}}
         void addAccount(String n){getWritableDatabase().execSQL("INSERT OR IGNORE INTO accounts(name) VALUES(?)",new Object[]{n});}
         void renameAccount(int id,String n){getWritableDatabase().execSQL("UPDATE accounts SET name=? WHERE id=?",new Object[]{n,id});}
-        void deleteAccount(int id){getWritableDatabase().execSQL("DELETE FROM entries WHERE account_id=?",new Object[]{id});getWritableDatabase().execSQL("DELETE FROM accounts WHERE id=?",new Object[]{id});}
+        void deleteAccount(int id){getWritableDatabase().execSQL("DELETE FROM entries WHERE account_id=?",new Object[]{id});getWritableDatabase().execSQL("DELETE FROM fixed_costs WHERE account_id=?",new Object[]{id});getWritableDatabase().execSQL("DELETE FROM accounts WHERE id=?",new Object[]{id});}
         void clearAll(){getWritableDatabase().execSQL("DELETE FROM entries");getWritableDatabase().execSQL("DELETE FROM accounts");}
         void clearFixedCosts(){getWritableDatabase().execSQL("DELETE FROM fixed_costs");}
-        void addFixedCost(String purpose,double amount,boolean income){getWritableDatabase().execSQL("INSERT INTO fixed_costs(purpose,amount,income) VALUES(?,?,?)",new Object[]{purpose,amount,income?1:0});}
+        void addFixedCost(int accountId,String purpose,double amount,boolean income){getWritableDatabase().execSQL("INSERT INTO fixed_costs(purpose,amount,income,account_id) VALUES(?,?,?,?)",new Object[]{purpose,amount,income?1:0,accountId});}
         void updateFixedCost(int id,String purpose,double amount,boolean income){getWritableDatabase().execSQL("UPDATE fixed_costs SET purpose=?,amount=?,income=? WHERE id=?",new Object[]{purpose,amount,income?1:0,id});}
         void deleteFixedCost(int id){getWritableDatabase().execSQL("DELETE FROM fixed_costs WHERE id=?",new Object[]{id});}
-        Cursor fixedCosts(){return getReadableDatabase().rawQuery("SELECT id,purpose,amount,income FROM fixed_costs ORDER BY id",null);}
+        Cursor fixedCosts(int accountId){return getReadableDatabase().rawQuery("SELECT id,purpose,amount,income FROM fixed_costs WHERE account_id=? ORDER BY id",new String[]{String.valueOf(accountId)});} Cursor fixedCost(int id){return getReadableDatabase().rawQuery("SELECT id,purpose,amount,income FROM fixed_costs WHERE id=?",new String[]{String.valueOf(id)});} Cursor allFixedCosts(){return getReadableDatabase().rawQuery("SELECT id,purpose,amount,income,account_id FROM fixed_costs ORDER BY account_id,id",null);}
         ArrayList<String> accounts(){ArrayList<String>a=new ArrayList<>();try(Cursor c=getReadableDatabase().rawQuery("SELECT name FROM accounts ORDER BY id",null)){while(c.moveToNext())a.add(c.getString(0));}return a;}
         int accountId(String n){try(Cursor c=getReadableDatabase().rawQuery("SELECT id FROM accounts WHERE name=?",new String[]{n})){return c.moveToFirst()?c.getInt(0):-1;}}
         String accountName(int id){try(Cursor c=getReadableDatabase().rawQuery("SELECT name FROM accounts WHERE id=?",new String[]{""+id})){return c.moveToFirst()?c.getString(0):"";}}
