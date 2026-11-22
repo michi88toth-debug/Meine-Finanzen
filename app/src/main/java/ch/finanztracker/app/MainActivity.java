@@ -121,7 +121,7 @@ public class MainActivity extends AppCompatActivity {
             TextView val=text((income?"+ ":"− ")+money(amount),15,income?GREEN:RED,true);card.addView(val);
             card.setOnClickListener(v->confirmEdit(id,purpose,date,amount,income));
         }
-        c.close();expenses.setText("Ausgaben\n"+money(exp));incomes.setText("Einnahmen\n"+money(inc));balance.setText("Saldo\n"+money(inc-exp));
+        c.close();expenses.setText("Ausgaben\n"+money(exp));incomes.setText("Einnahmen\n"+money(inc));balance.setText("Saldo\n"+money(transfer+inc-exp));
     }
     String money(double n){return String.format(Locale.GERMANY,"CHF %,.2f",n);}
     void entryDialog(boolean income,int[] existing){
