@@ -228,22 +228,38 @@ public class MainActivity extends AppCompatActivity {
     void menu(){String[]opts={"Konten verwalten","Meine Fixkosten","Sicherheit","Datensicherung","Abbrechen"};new AlertDialog.Builder(this).setTitle("Menü").setItems(opts,(d,w)->{if(w==0)accountsDialog();if(w==1)fixedCostsDialog();if(w==2)securityDialog();if(w==3)backupDialog();}).show();}
 
     void fixedCostsDialog(){
-        Cursor c=db.fixedCosts();ArrayList<Integer> ids=new ArrayList<>();ArrayList<String> labels=new ArrayList<>();
-        while(c.moveToNext()){ids.add(c.getInt(0));labels.add(c.getString(1)+" · "+money(c.getDouble(2))+" · "+(c.getInt(3)==1?"Einnahme":"Ausgabe"));}c.close();
-        ArrayList<String> options=new ArrayList<>(labels);options.add("＋ Fixkosten hinzufügen");options.add("Schliessen");
-        new AlertDialog.Builder(this).setTitle("Meine Fixkosten").setItems(options.toArray(new String[0]),(d,w)->{if(w<ids.size())editFixedCost(ids.get(w));else if(w==ids.size())editFixedCost(-1);}).show();
+        LinearLayout content=column();content.setPadding(dp(18),dp(8),dp(18),dp(8));
+        LinearLayout items=column();ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.addView(items);content.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        EditText purpose=new EditText(this),amount=new EditText(this);purpose.setHint("Bezeichnung");amount.setHint("Betrag in CHF");amount.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        Spinner type=new Spinner(this);type.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Ausgabe","Einnahme"}));
+        content.addView(text("Neue Fixkosten erfassen",14,DARK,true));content.addView(purpose,lp(-1,48));content.addView(amount,lp(-1,48));content.addView(type,lp(-1,48));
+        LinearLayout buttons=row();content.addView(buttons,lp(-1,52));Button add=button("Hinzufügen",GREEN),close=button("Schliessen",0xFF68756E);
+        LinearLayout.LayoutParams bp=lp(0,44);bp.weight=1;bp.rightMargin=dp(5);buttons.addView(add,bp);LinearLayout.LayoutParams cp=lp(0,44);cp.weight=1;cp.leftMargin=dp(5);buttons.addView(close,cp);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Meine Fixkosten").setView(content).create();
+        Runnable reload=()->{
+            items.removeAllViews();Cursor c=db.fixedCosts();boolean any=false;
+            while(c.moveToNext()){any=true;int id=c.getInt(0);String name=c.getString(1);double value=c.getDouble(2);boolean income=c.getInt(3)==1;
+                LinearLayout item=column();item.setPadding(dp(10),dp(8),dp(10),dp(8));item.setBackground(shape(0xFFFFFFFF,10));
+                TextView title=text(name,16,DARK,true);TextView sub=text(money(value)+" · "+(income?"Einnahme":"Ausgabe"),13,income?GREEN:RED,false);item.addView(title);item.addView(sub);
+                LinearLayout.LayoutParams rowp=lp(-1,-2);rowp.bottomMargin=dp(6);items.addView(item,rowp);item.setOnClickListener(v->editFixedCost(id));
+            }c.close();if(!any)items.addView(text("Noch keine Fixkosten gespeichert.",14,0xFF77847D,false));
+        };
+        reload.run();
+        add.setOnClickListener(v->{String p=purpose.getText().toString().trim(),raw=amount.getText().toString().trim().replace(",",".");
+            if(p.isEmpty()||raw.isEmpty()){toast("Bitte Bezeichnung und Betrag eingeben.");return;}
+            try{double value=Double.parseDouble(raw);if(value<=0)throw new NumberFormatException();db.addFixedCost(p,value,type.getSelectedItemPosition()==1);scheduleAutomaticBackup();purpose.setText("");amount.setText("");type.setSelection(0);reload.run();toast("Fixkosten gespeichert.");}
+            catch(Exception ex){toast("Bitte einen gültigen Betrag eingeben.");}
+        });
+        close.setOnClickListener(v->dialog.dismiss());dialog.show();
     }
     void editFixedCost(int id){
         EditText purpose=new EditText(this),amount=new EditText(this);purpose.setHint("Bezeichnung");amount.setHint("Betrag in CHF");amount.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
         Spinner type=new Spinner(this);type.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Ausgabe","Einnahme"}));
         LinearLayout box=column();box.setPadding(dp(20),dp(8),dp(20),0);box.addView(purpose);box.addView(amount);box.addView(type);
-        if(id>0){try(Cursor c=db.fixedCosts()){while(c.moveToNext())if(c.getInt(0)==id){purpose.setText(c.getString(1));amount.setText(String.valueOf(c.getDouble(2)));type.setSelection(c.getInt(3)==1?1:0);break;}}}
-        AlertDialog.Builder builder=new AlertDialog.Builder(this).setTitle(id>0?"Fixkosten bearbeiten":"Fixkosten hinzufügen").setView(box).setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{
-            String p=purpose.getText().toString().trim(),raw=amount.getText().toString().trim().replace(",",".");if(p.isEmpty()||raw.isEmpty()){toast("Bitte Bezeichnung und Betrag eingeben.");return;}
-            try{double value=Double.parseDouble(raw);if(value<=0)throw new NumberFormatException();if(id>0)db.updateFixedCost(id,p,value,type.getSelectedItemPosition()==1);else db.addFixedCost(p,value,type.getSelectedItemPosition()==1);scheduleAutomaticBackup();toast("Fixkosten gespeichert.");}catch(Exception ex){toast("Bitte einen gültigen Betrag eingeben.");}
-        });
-        if(id>0)builder.setNeutralButton("Löschen",(d,w)->new AlertDialog.Builder(this).setMessage("Diese Fixkosten löschen?").setNegativeButton("Abbrechen",null).setPositiveButton("Löschen",(a,b)->{db.deleteFixedCost(id);scheduleAutomaticBackup();toast("Fixkosten gelöscht.");}).show());
-        builder.show();
+        try(Cursor c=db.fixedCosts()){while(c.moveToNext())if(c.getInt(0)==id){purpose.setText(c.getString(1));amount.setText(String.valueOf(c.getDouble(2)));type.setSelection(c.getInt(3)==1?1:0);break;}}
+        new AlertDialog.Builder(this).setTitle("Fixkosten bearbeiten").setView(box).setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{
+            String p=purpose.getText().toString().trim(),raw=amount.getText().toString().trim().replace(",",".");try{double value=Double.parseDouble(raw);if(p.isEmpty()||value<=0)throw new NumberFormatException();db.updateFixedCost(id,p,value,type.getSelectedItemPosition()==1);scheduleAutomaticBackup();toast("Fixkosten gespeichert.");}catch(Exception ex){toast("Bitte Bezeichnung und gültigen Betrag eingeben.");}
+        }).setNeutralButton("Löschen",(d,w)->new AlertDialog.Builder(this).setMessage("Diese Fixkosten löschen?").setNegativeButton("Abbrechen",null).setPositiveButton("Löschen",(a,b)->{db.deleteFixedCost(id);scheduleAutomaticBackup();toast("Fixkosten gelöscht.");}).show()).show();
     }
     void insertFixedCosts(){
         if(accountId<0){toast("Bitte zuerst ein Konto auswählen.");return;}
