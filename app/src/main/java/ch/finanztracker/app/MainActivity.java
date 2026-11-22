@@ -124,18 +124,25 @@ public class MainActivity extends AppCompatActivity {
         c.close();expenses.setText("Ausgaben\n"+money(exp));incomes.setText("Einnahmen\n"+money(inc));balance.setText("Saldo\n"+money(transfer+inc-exp));
     }
     String money(double n){return String.format(Locale.GERMANY,"CHF %,.2f",n);}
+    ScrollView scrollableForm(View content){
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.setSmoothScrollingEnabled(true);
+        scroll.setVerticalScrollBarEnabled(true);scroll.addView(content,new ScrollView.LayoutParams(-1,-2));return scroll;
+    }
+    void enableDialogKeyboardResize(AlertDialog dialog){
+        if(dialog!=null&&dialog.getWindow()!=null)dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE|WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+    }
     void entryDialog(boolean income,int[] existing){
         final EditText purpose=new EditText(this),amount=new EditText(this);purpose.setHint("Zweck (optional)");amount.setHint("Betrag in CHF");amount.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        LinearLayout box=column();box.setPadding(dp(20),dp(8),dp(20),0);
+        LinearLayout box=column();box.setPadding(dp(20),dp(8),dp(20),dp(8));
         box.addView(purpose);box.addView(amount);activeReceiptPath="";
         final Calendar cal=Calendar.getInstance();final TextView date=text("Datum: "+new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).format(cal.getTime())+"  ✎",15,GREEN,true);date.setPadding(0,dp(14),0,dp(8));box.addView(date);final TextView time=text("Uhrzeit: "+new SimpleDateFormat("HH:mm",Locale.GERMANY).format(cal.getTime())+"  ✎",15,GREEN,true);time.setPadding(0,dp(4),0,dp(8));box.addView(time);
         date.setOnClickListener(v->new DatePickerDialog(this,(view,yy,mm,dd)->{cal.set(yy,mm,dd);date.setText("Datum: "+String.format(Locale.GERMANY,"%02d.%02d.%04d",dd,mm+1,yy)+"  ✎");},cal.get(Calendar.YEAR),cal.get(Calendar.MONTH),cal.get(Calendar.DAY_OF_MONTH)).show());time.setOnClickListener(v->new TimePickerDialog(this,(view,hh,mi)->{cal.set(Calendar.HOUR_OF_DAY,hh);cal.set(Calendar.MINUTE,mi);time.setText("Uhrzeit: "+String.format(Locale.GERMANY,"%02d:%02d",hh,mi)+"  ✎");},cal.get(Calendar.HOUR_OF_DAY),cal.get(Calendar.MINUTE),true).show());
         receiptAddButton=text("＋  Quittung hinzufügen",14,GREEN,true);receiptAddButton.setPadding(0,dp(10),0,dp(10));box.addView(receiptAddButton);receiptAddButton.setOnClickListener(v->receiptChoiceDialog());
         if(existing!=null){Cursor e=db.one(existing[0]);if(e.moveToFirst()){purpose.setText(e.getString(1));amount.setText(""+e.getDouble(3));activeReceiptPath=e.getString(5)==null?"":e.getString(5);if(!activeReceiptPath.isEmpty()&&new File(activeReceiptPath).exists())receiptAddButton.setText("🧾  Quittung ändern / hinzufügen");try{cal.setTime(new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).parse(e.getString(2)));}catch(Exception ignored){}String savedTime=e.getString(6)==null?"00:00":e.getString(6);try{String[] hm=savedTime.split(":");cal.set(Calendar.HOUR_OF_DAY,Integer.parseInt(hm[0]));cal.set(Calendar.MINUTE,Integer.parseInt(hm[1]));}catch(Exception ignored){}date.setText("Datum: "+e.getString(2)+"  ✎");time.setText("Uhrzeit: "+savedTime+"  ✎");}e.close();}
-        new AlertDialog.Builder(this).setTitle(income?"Einnahme erfassen":"Ausgabe erfassen").setView(box).setNegativeButton("Abbrechen",null).setPositiveButton(existing==null?"Speichern":"Änderungen speichern",(d,w)->{
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(income?"Einnahme erfassen":"Ausgabe erfassen").setView(scrollableForm(box)).setNegativeButton("Abbrechen",null).setPositiveButton(existing==null?"Speichern":"Änderungen speichern",(d,w)->{
             String p=purpose.getText().toString().trim();String a=amount.getText().toString().trim().replace(",",".");if(a.isEmpty()){toast("Bitte einen Betrag eingeben.");return;}
             try{double n=Double.parseDouble(a);if(n<=0)throw new Exception();String dt=new SimpleDateFormat("dd.MM.yyyy",Locale.GERMANY).format(cal.getTime());String tm=new SimpleDateFormat("HH:mm",Locale.GERMANY).format(cal.getTime());if(existing==null)db.addEntry(accountId,p,dt,tm,n,income,activeReceiptPath);else db.updateEntry(existing[0],p,dt,tm,n,income,activeReceiptPath);refresh();scheduleAutomaticBackup();}catch(Exception ex){toast("Bitte einen gültigen Betrag eingeben.");}
-        }).show();
+        }).create();dialog.show();enableDialogKeyboardResize(dialog);
     }
     void captureReceipt(){
         try{File dir=new File(getFilesDir(),"receipts");if(!dir.exists()&&!dir.mkdirs())throw new IOException("Quittungsordner konnte nicht erstellt werden.");File photo=new File(dir,"receipt_"+System.currentTimeMillis()+".jpg");pendingReceiptCapturePath=photo.getAbsolutePath();Uri uri=androidx.core.content.FileProvider.getUriForFile(this,getPackageName()+".fileprovider",photo);Intent camera=new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);camera.putExtra(android.provider.MediaStore.EXTRA_OUTPUT,uri);camera.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);camera.setClipData(ClipData.newUri(getContentResolver(),"Quittung",uri));if(camera.resolveActivity(getPackageManager())!=null)startActivityForResult(camera,REQ_RECEIPT_CAMERA);else{pendingReceiptCapturePath="";toast("Keine Kamera-App gefunden.");}}catch(Exception e){pendingReceiptCapturePath="";showErrorDialog("Kamera konnte nicht geöffnet werden",e.toString());}
@@ -260,37 +267,35 @@ public class MainActivity extends AppCompatActivity {
     void fixedCostsDialog(){
         LinearLayout content=column();content.setPadding(dp(18),dp(8),dp(18),dp(8));
         TextView accountLabel=text("Fixkosten für: "+db.accountName(accountId),14,GREEN,true);accountLabel.setPadding(dp(4),dp(4),dp(4),dp(10));content.addView(accountLabel);
-        LinearLayout items=column();ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.addView(items);content.addView(scroll,lp(-1,220));
+        LinearLayout items=column();ScrollView listScroll=new ScrollView(this);listScroll.setFillViewport(false);listScroll.addView(items);content.addView(listScroll,lp(-1,220));
         EditText purpose=new EditText(this),amount=new EditText(this);purpose.setHint("Bezeichnung");amount.setHint("Betrag in CHF");amount.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
         Spinner type=new Spinner(this);type.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Ausgabe","Einnahme"}));
         content.addView(text("Neue Fixkosten erfassen",14,DARK,true));content.addView(purpose,lp(-1,48));content.addView(amount,lp(-1,48));content.addView(type,lp(-1,48));
         LinearLayout buttons=row();content.addView(buttons,lp(-1,52));Button add=button("Hinzufügen",GREEN),close=button("Schliessen",0xFF68756E);
         LinearLayout.LayoutParams bp=lp(0,44);bp.weight=1;bp.rightMargin=dp(5);buttons.addView(add,bp);LinearLayout.LayoutParams cp=lp(0,44);cp.weight=1;cp.leftMargin=dp(5);buttons.addView(close,cp);
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Meine Fixkosten").setView(content).create();
-        Runnable reload=()->{
-            items.removeAllViews();Cursor c=db.fixedCosts(accountId);boolean any=false;
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Meine Fixkosten").setView(scrollableForm(content)).create();
+        Runnable reload=()->{items.removeAllViews();Cursor c=db.fixedCosts(accountId);boolean any=false;
             while(c.moveToNext()){any=true;int id=c.getInt(0);String name=c.getString(1);double value=c.getDouble(2);boolean income=c.getInt(3)==1;
                 LinearLayout item=column();item.setPadding(dp(10),dp(8),dp(10),dp(8));item.setBackground(shape(0xFFFFFFFF,10));
-                TextView title=text(name,16,DARK,true);TextView sub=text(money(value)+" · "+(income?"Einnahme":"Ausgabe"),13,income?GREEN:RED,false);item.addView(title);item.addView(sub);
+                item.addView(text(name,16,DARK,true));item.addView(text(money(value)+" · "+(income?"Einnahme":"Ausgabe"),13,income?GREEN:RED,false));
                 LinearLayout.LayoutParams rowp=lp(-1,-2);rowp.bottomMargin=dp(6);items.addView(item,rowp);item.setOnClickListener(v->editFixedCost(id));
             }c.close();if(!any)items.addView(text("Noch keine Fixkosten gespeichert.",14,0xFF77847D,false));
-        };
-        reload.run();
+        };reload.run();
         add.setOnClickListener(v->{String p=purpose.getText().toString().trim(),raw=amount.getText().toString().trim().replace(",",".");
             if(p.isEmpty()||raw.isEmpty()){toast("Bitte Bezeichnung und Betrag eingeben.");return;}
             try{double value=Double.parseDouble(raw);if(value<=0)throw new NumberFormatException();db.addFixedCost(accountId,p,value,type.getSelectedItemPosition()==1);scheduleAutomaticBackup();purpose.setText("");amount.setText("");type.setSelection(0);reload.run();toast("Fixkosten gespeichert.");}
             catch(Exception ex){toast("Bitte einen gültigen Betrag eingeben.");}
         });
-        close.setOnClickListener(v->dialog.dismiss());dialog.show();
+        close.setOnClickListener(v->dialog.dismiss());dialog.show();enableDialogKeyboardResize(dialog);
     }
     void editFixedCost(int id){
         EditText purpose=new EditText(this),amount=new EditText(this);purpose.setHint("Bezeichnung");amount.setHint("Betrag in CHF");amount.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
         Spinner type=new Spinner(this);type.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Ausgabe","Einnahme"}));
-        LinearLayout box=column();box.setPadding(dp(20),dp(8),dp(20),0);box.addView(purpose);box.addView(amount);box.addView(type);
+        LinearLayout box=column();box.setPadding(dp(20),dp(8),dp(20),dp(8));box.addView(purpose);box.addView(amount);box.addView(type);
         try(Cursor c=db.fixedCost(id)){while(c.moveToNext())if(c.getInt(0)==id){purpose.setText(c.getString(1));amount.setText(String.valueOf(c.getDouble(2)));type.setSelection(c.getInt(3)==1?1:0);break;}}
-        new AlertDialog.Builder(this).setTitle("Fixkosten bearbeiten").setView(box).setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Fixkosten bearbeiten").setView(scrollableForm(box)).setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{
             String p=purpose.getText().toString().trim(),raw=amount.getText().toString().trim().replace(",",".");try{double value=Double.parseDouble(raw);if(p.isEmpty()||value<=0)throw new NumberFormatException();db.updateFixedCost(id,p,value,type.getSelectedItemPosition()==1);scheduleAutomaticBackup();toast("Fixkosten gespeichert.");}catch(Exception ex){toast("Bitte Bezeichnung und gültigen Betrag eingeben.");}
-        }).setNeutralButton("Löschen",(d,w)->new AlertDialog.Builder(this).setMessage("Diese Fixkosten löschen?").setNegativeButton("Abbrechen",null).setPositiveButton("Löschen",(a,b)->{db.deleteFixedCost(id);scheduleAutomaticBackup();toast("Fixkosten gelöscht.");}).show()).show();
+        }).setNeutralButton("Löschen",(d,w)->new AlertDialog.Builder(this).setMessage("Diese Fixkosten löschen?").setNegativeButton("Abbrechen",null).setPositiveButton("Löschen",(a,b)->{db.deleteFixedCost(id);scheduleAutomaticBackup();toast("Fixkosten gelöscht.");}).show()).create();dialog.show();enableDialogKeyboardResize(dialog);
     }
     void insertFixedCosts(){
         if(accountId<0){toast("Bitte zuerst ein Konto auswählen.");return;}
@@ -313,7 +318,11 @@ public class MainActivity extends AppCompatActivity {
             });
     }
     interface TextDone{void done(String s);}
-    void askText(String title,TextDone done){EditText e=new EditText(this);e.setHint("Name");new AlertDialog.Builder(this).setTitle(title).setView(e).setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{String s=e.getText().toString().trim();if(!s.isEmpty())done.done(s);}).show();}
+    void askText(String title,TextDone done){
+        EditText e=new EditText(this);e.setHint("Name");LinearLayout box=column();box.setPadding(dp(20),dp(8),dp(20),dp(8));box.addView(e);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(title).setView(scrollableForm(box)).setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{String value=e.getText().toString().trim();if(!value.isEmpty())done.done(value);}).create();
+        dialog.show();enableDialogKeyboardResize(dialog);
+    }
     void securityDialog(){
         boolean pinOn=getPreferences(0).getBoolean("pin_on",false),bioOn=getPreferences(0).getBoolean("bio_on",false);
         roundedOptionsDialog("Sicherheit",
@@ -326,10 +335,11 @@ public class MainActivity extends AppCompatActivity {
     }
     void setNewPin(){
         EditText e=new EditText(this);e.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);e.setHint("Neue PIN (mind. 4 Ziffern)");
-        new AlertDialog.Builder(this).setTitle("PIN festlegen").setView(e).setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{
+        LinearLayout box=column();box.setPadding(dp(20),dp(8),dp(20),dp(8));box.addView(e);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("PIN festlegen").setView(scrollableForm(box)).setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{
             String p=e.getText().toString();if(p.length()<4){toast("PIN muss mindestens 4 Ziffern haben.");return;}
             getPreferences(0).edit().putString("pin",p).putBoolean("pin_on",true).apply();toast("PIN aktiviert.");
-        }).show();
+        }).create();dialog.show();enableDialogKeyboardResize(dialog);
     }
     void toggleBiometric(){
         boolean enabled=getPreferences(0).getBoolean("bio_on",false);
@@ -364,9 +374,10 @@ public class MainActivity extends AppCompatActivity {
     }
     void showPinDialog(){
         EditText e=new EditText(this);e.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);e.setHint("PIN");
-        new AlertDialog.Builder(this).setTitle("PIN eingeben").setMessage("Bitte PIN zum Öffnen eingeben.").setView(e).setCancelable(false)
+        LinearLayout box=column();box.setPadding(dp(20),dp(8),dp(20),dp(8));box.addView(e);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("PIN eingeben").setMessage("Bitte PIN zum Öffnen eingeben.").setView(scrollableForm(box)).setCancelable(false)
             .setPositiveButton("Entsperren",(d,w)->{if(!e.getText().toString().equals(getPreferences(0).getString("pin",""))){toast("PIN falsch. Bitte App erneut öffnen und nochmals versuchen.");finish();}})
-            .setNegativeButton("Beenden",(d,w)->finish()).show();
+            .setNegativeButton("Beenden",(d,w)->finish()).create();dialog.show();enableDialogKeyboardResize(dialog);
     }
     void backupDialog(){
         boolean connected=getPreferences(0).getString("google_drive_backup_uri",null)!=null;
