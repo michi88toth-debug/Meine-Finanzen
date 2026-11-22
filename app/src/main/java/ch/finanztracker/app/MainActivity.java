@@ -229,7 +229,7 @@ public class MainActivity extends AppCompatActivity {
 
     void fixedCostsDialog(){
         LinearLayout content=column();content.setPadding(dp(18),dp(8),dp(18),dp(8));
-        LinearLayout items=column();ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.addView(items);content.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        LinearLayout items=column();ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.addView(items);content.addView(scroll,lp(-1,220));
         EditText purpose=new EditText(this),amount=new EditText(this);purpose.setHint("Bezeichnung");amount.setHint("Betrag in CHF");amount.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
         Spinner type=new Spinner(this);type.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Ausgabe","Einnahme"}));
         content.addView(text("Neue Fixkosten erfassen",14,DARK,true));content.addView(purpose,lp(-1,48));content.addView(amount,lp(-1,48));content.addView(type,lp(-1,48));
