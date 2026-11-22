@@ -240,6 +240,23 @@ public class MainActivity extends AppCompatActivity {
         Button close=button("Schliessen",0xFF68756E);panel.addView(close,lp(-1,46));close.setOnClickListener(v->dialog.dismiss());dialog.show();
     }
 
+    interface MenuAction{void selected(int index);}
+    void roundedOptionsDialog(String title,String[] titles,String[] subtitles,String[] icons,int[] colors,MenuAction action){
+        LinearLayout panel=column();panel.setPadding(dp(16),dp(14),dp(16),dp(12));panel.setBackground(shape(BG,24));
+        TextView heading=text(title,20,DARK,true);heading.setPadding(dp(6),dp(2),dp(6),dp(14));panel.addView(heading);
+        AlertDialog dialog=new AlertDialog.Builder(this).setView(panel).create();
+        for(int i=0;i<titles.length;i++){
+            final int selected=i;LinearLayout item=row();item.setBackground(shape(0xFFFFFFFF,18));item.setPadding(dp(12),dp(11),dp(12),dp(11));
+            LinearLayout.LayoutParams itemParams=lp(-1,-2);itemParams.bottomMargin=dp(9);panel.addView(item,itemParams);
+            TextView symbol=text(icons[i],21,DARK,true);symbol.setGravity(Gravity.CENTER);symbol.setBackground(shape(colors[i],30));item.addView(symbol,lp(44,44));
+            LinearLayout details=column();LinearLayout.LayoutParams detailParams=new LinearLayout.LayoutParams(0,-2,1);detailParams.leftMargin=dp(12);item.addView(details,detailParams);
+            details.addView(text(titles[i],15,DARK,true));details.addView(text(subtitles[i],12,0xFF718078,false));
+            item.addView(text("›",25,0xFF718078,false));item.setOnClickListener(v->{dialog.dismiss();action.selected(selected);});
+        }
+        Button close=button("Schliessen",0xFF68756E);panel.addView(close,lp(-1,46));close.setOnClickListener(v->dialog.dismiss());
+        dialog.show();
+    }
+
     void fixedCostsDialog(){
         LinearLayout content=column();content.setPadding(dp(18),dp(8),dp(18),dp(8));
         TextView accountLabel=text("Fixkosten für: "+db.accountName(accountId),14,GREEN,true);accountLabel.setPadding(dp(4),dp(4),dp(4),dp(10));content.addView(accountLabel);
@@ -285,18 +302,27 @@ public class MainActivity extends AppCompatActivity {
             refresh();scheduleAutomaticBackup();toast(count+" Fixkosten für den "+date+" eingefügt.");
         },cal.get(Calendar.YEAR),cal.get(Calendar.MONTH),cal.get(Calendar.DAY_OF_MONTH)).show();
     }
-    void accountsDialog(){String[]opts={"Konto hinzufügen","Konto umbenennen","Konto löschen"};new AlertDialog.Builder(this).setTitle("Konten verwalten").setItems(opts,(d,w)->{if(w==0)askText("Neues Konto",name->{db.addAccount(name);getPreferences(0).edit().putString("last_account_name",name).apply();accountId=-1;reloadAccounts();refresh();});else if(w==1)askText("Neuer Kontoname",name->{db.renameAccount(accountId,name);getPreferences(0).edit().putString("last_account_name",name).apply();reloadAccounts();refresh();});else new AlertDialog.Builder(this).setMessage("Konto und alle zugehörigen Einträge löschen?").setNegativeButton("Abbrechen",null).setPositiveButton("Löschen",(a,b)->{db.deleteAccount(accountId);ensureAccount();accountId=-1;reloadAccounts();refresh();}).show();}).show();}
+    void accountsDialog(){
+        roundedOptionsDialog("Konten verwalten",
+            new String[]{"Konto hinzufügen","Konto umbenennen","Konto löschen"},
+            new String[]{"Ein weiteres Konto erstellen","Name des ausgewählten Kontos ändern","Konto samt Einträgen und Fixkosten entfernen"},
+            new String[]{"+","✎","−"},new int[]{0xFFE4F2E9,0xFFEAF1FA,0xFFFFE8E8},w->{
+                if(w==0)askText("Neues Konto",name->{db.addAccount(name);getPreferences(0).edit().putString("last_account_name",name).apply();accountId=-1;reloadAccounts();refresh();});
+                else if(w==1)askText("Neuer Kontoname",name->{db.renameAccount(accountId,name);getPreferences(0).edit().putString("last_account_name",name).apply();reloadAccounts();refresh();});
+                else new AlertDialog.Builder(this).setMessage("Konto und alle zugehörigen Einträge sowie Fixkosten löschen?").setNegativeButton("Abbrechen",null).setPositiveButton("Löschen",(a,b)->{db.deleteAccount(accountId);ensureAccount();accountId=-1;reloadAccounts();refresh();scheduleAutomaticBackup();}).show();
+            });
+    }
     interface TextDone{void done(String s);}
     void askText(String title,TextDone done){EditText e=new EditText(this);e.setHint("Name");new AlertDialog.Builder(this).setTitle(title).setView(e).setNegativeButton("Abbrechen",null).setPositiveButton("Speichern",(d,w)->{String s=e.getText().toString().trim();if(!s.isEmpty())done.done(s);}).show();}
     void securityDialog(){
-        boolean pinOn=getPreferences(0).getBoolean("pin_on",false);
-        boolean bioOn=getPreferences(0).getBoolean("bio_on",false);
-        String[]opts={"PIN-Abfrage "+(pinOn?"deaktivieren":"aktivieren"),"PIN ändern","Fingerabdruck "+(bioOn?"deaktivieren":"aktivieren")};
-        new AlertDialog.Builder(this).setTitle("Sicherheit").setItems(opts,(d,w)->{
-            if(w==0){if(pinOn){getPreferences(0).edit().putBoolean("pin_on",false).apply();toast("PIN-Abfrage deaktiviert.");}else setNewPin();}
-            else if(w==1)setNewPin();
-            else toggleBiometric();
-        }).show();
+        boolean pinOn=getPreferences(0).getBoolean("pin_on",false),bioOn=getPreferences(0).getBoolean("bio_on",false);
+        roundedOptionsDialog("Sicherheit",
+            new String[]{"PIN-Abfrage "+(pinOn?"deaktivieren":"aktivieren"),"PIN ändern","Fingerabdruck "+(bioOn?"deaktivieren":"aktivieren")},
+            new String[]{pinOn?"Die PIN beim Öffnen der App nicht mehr abfragen":"App mit einer PIN schützen","Eine neue PIN festlegen","Biometrische Anmeldung verwalten"},
+            new String[]{"●","✎","◎"},new int[]{0xFFEAF1FA,0xFFE4F2E9,0xFFEDE8F8},w->{
+                if(w==0){if(pinOn){getPreferences(0).edit().putBoolean("pin_on",false).apply();toast("PIN-Abfrage deaktiviert.");}else setNewPin();}
+                else if(w==1)setNewPin();else toggleBiometric();
+            });
     }
     void setNewPin(){
         EditText e=new EditText(this);e.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);e.setHint("Neue PIN (mind. 4 Ziffern)");
@@ -344,22 +370,24 @@ public class MainActivity extends AppCompatActivity {
     }
     void backupDialog(){
         boolean connected=getPreferences(0).getString("google_drive_backup_uri",null)!=null;
-        String[] opts={"Backup auf Gerät speichern","Backup importieren / wiederherstellen","Google Drive-Backup einrichten / ändern","Google Drive-Backup wiederherstellen","Google Drive-Backup deaktivieren"};
-        new AlertDialog.Builder(this).setTitle("Datensicherung").setItems(opts,(d,w)->{
-            if(w==0){Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");i.putExtra(Intent.EXTRA_TITLE,"Meine-Finanzen-Backup.json");startActivityForResult(i,REQ_BACKUP);}
-            else if(w==1){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");startActivityForResult(i,REQ_RESTORE);}
-            else if(w==2)chooseGoogleDriveBackupFile();
-            else if(w==3){
-                String saved=getPreferences(0).getString("google_drive_backup_uri",null);
-                if(saved!=null){try{readBackup(Uri.parse(saved));}catch(Exception e){showErrorDialog("Google-Drive-Backup konnte nicht gelesen werden",e.toString());}}
-                else chooseGoogleDriveBackupForRestore();
-            }else if(w==4){
-                String saved=getPreferences(0).getString("google_drive_backup_uri",null);
-                if(saved!=null){try{getContentResolver().releasePersistableUriPermission(Uri.parse(saved),Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);}catch(Exception ignored){}}
-                getPreferences(0).edit().remove("google_drive_backup_uri").remove("google_drive_backup_fingerprint").apply();
-                toast("Google-Drive-Backup-Verbindung entfernt. Die lokale automatische Sicherung bleibt aktiv.");
-            }
-        }).show();
+        roundedOptionsDialog("Datensicherung",
+            new String[]{"Backup auf Gerät speichern","Backup importieren / wiederherstellen","Google Drive-Backup "+(connected?"ändern":"einrichten"),"Google Drive-Backup wiederherstellen","Google Drive-Backup deaktivieren"},
+            new String[]{"Sicherung als Datei exportieren","Vorhandene Sicherungsdatei einlesen","Automatische Sicherung in Google Drive "+(connected?"verwalten":"verbinden"),"Daten aus Google Drive übernehmen","Verknüpfung zu Google Drive entfernen"},
+            new String[]{"↓","↑","☁","↻","×"},new int[]{0xFFEAF1FA,0xFFE4F2E9,0xFFEDE8F8,0xFFFFF2DF,0xFFFFE8E8},w->{
+                if(w==0){Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");i.putExtra(Intent.EXTRA_TITLE,"Meine-Finanzen-Backup.json");startActivityForResult(i,REQ_BACKUP);}
+                else if(w==1){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");startActivityForResult(i,REQ_RESTORE);}
+                else if(w==2)chooseGoogleDriveBackupFile();
+                else if(w==3){
+                    String saved=getPreferences(0).getString("google_drive_backup_uri",null);
+                    if(saved!=null){try{readBackup(Uri.parse(saved));}catch(Exception e){showErrorDialog("Google-Drive-Backup konnte nicht gelesen werden",e.toString());}}
+                    else chooseGoogleDriveBackupForRestore();
+                }else{
+                    String saved=getPreferences(0).getString("google_drive_backup_uri",null);
+                    if(saved!=null){try{getContentResolver().releasePersistableUriPermission(Uri.parse(saved),Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);}catch(Exception ignored){}}
+                    getPreferences(0).edit().remove("google_drive_backup_uri").remove("google_drive_backup_fingerprint").apply();
+                    toast("Google-Drive-Backup-Verbindung entfernt. Die lokale automatische Sicherung bleibt aktiv.");
+                }
+            });
     }
     void chooseGoogleDriveBackupFile(){
         Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);
