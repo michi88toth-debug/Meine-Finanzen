@@ -75,8 +75,9 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout.LayoutParams ap=lp(0,68);ap.weight=1;ap.rightMargin=dp(6);actions.addView(plus,ap);LinearLayout.LayoutParams mp=lp(0,68);mp.weight=1;mp.leftMargin=dp(6);actions.addView(minus,mp);
         plus.setOnClickListener(v->entryDialog(true,null));minus.setOnClickListener(v->entryDialog(false,null));
         LinearLayout filters=row();filters.setPadding(dp(16),dp(4),dp(16),dp(8));root.addView(filters,lp(-1,62));
-        monthSpin=new Spinner(this);yearSpin=new Spinner(this);LinearLayout.LayoutParams fp=lp(0,48);fp.weight=1;fp.rightMargin=dp(5);filters.addView(monthSpin,fp);LinearLayout.LayoutParams yp=lp(0,48);yp.weight=1;yp.leftMargin=dp(5);filters.addView(yearSpin,yp);
-        TextView filterButton=text("☷",25,GREEN,true);filterButton.setGravity(Gravity.CENTER);filterButton.setBackground(shape(0xFFFFFFFF,14));filterButton.setContentDescription("Filter für Einträge");LinearLayout.LayoutParams filterParams=lp(48,48);filterParams.leftMargin=dp(8);filters.addView(filterButton,filterParams);filterButton.setOnClickListener(v->showSortFilterDialog());
+        monthSpin=new Spinner(this);yearSpin=new Spinner(this);LinearLayout.LayoutParams fp=lp(0,48);fp.weight=1.45f;fp.rightMargin=dp(4);filters.addView(monthSpin,fp);LinearLayout.LayoutParams yp=lp(0,48);yp.weight=.8f;yp.leftMargin=dp(4);filters.addView(yearSpin,yp);
+        monthSpin.setDropDownWidth(getResources().getDisplayMetrics().widthPixels-dp(32));yearSpin.setDropDownWidth(dp(120));
+        FunnelIconView filterButton=new FunnelIconView();filterButton.setBackground(shape(0xFFFFFFFF,14));filterButton.setContentDescription("Sortierung filtern");LinearLayout.LayoutParams filterParams=lp(48,48);filterParams.leftMargin=dp(8);filters.addView(filterButton,filterParams);filterButton.setOnClickListener(v->showSortFilterDialog());
         setupFilters();
         ScrollView sc=new ScrollView(this);sc.setFillViewport(false);root.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
         list=column();list.setPadding(dp(16),dp(2),dp(16),dp(12));sc.addView(list);
@@ -94,6 +95,11 @@ public class MainActivity extends AppCompatActivity {
         yearSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){selectedYear=Integer.parseInt(ys.get(pos));refresh();}});
     }
     void reloadAccounts(){accounts=db.accounts();ArrayAdapter<String>a=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,accounts);accountSpin.setAdapter(a);String savedName=getPreferences(0).getString("last_account_name","");String wanted=savedName;if(accountId>0){String current=db.accountName(accountId);if(!current.isEmpty())wanted=current;}int initial=accounts.indexOf(wanted);if(initial<0)initial=0;accountSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){if(pos>=0&&pos<accounts.size()){String name=accounts.get(pos);accountId=db.accountId(name);getPreferences(0).edit().putString("last_account_name",name).apply();refresh();}}});if(!accounts.isEmpty()){accountSpin.setSelection(initial);accountId=db.accountId(accounts.get(initial));}else accountId=-1;}
+    class FunnelIconView extends View {
+        final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        FunnelIconView(){super(MainActivity.this);}
+        @Override protected void onDraw(Canvas canvas){super.onDraw(canvas);float cx=getWidth()/2f,top=getHeight()*.28f,left=getWidth()*.25f,right=getWidth()*.75f;paint.setColor(GREEN);paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(dp(2.2f));paint.setStrokeCap(Paint.Cap.ROUND);paint.setStrokeJoin(Paint.Join.ROUND);Path p=new Path();p.moveTo(left,top);p.lineTo(right,top);p.lineTo(cx+dp(4),getHeight()*.53f);p.lineTo(cx+dp(4),getHeight()*.68f);p.lineTo(cx-dp(4),getHeight()*.76f);p.lineTo(cx-dp(4),getHeight()*.53f);p.close();canvas.drawPath(p,paint);}
+    }
     void showSortFilterDialog(){
         int selected=getPreferences(0).getInt("entry_sort_"+accountId,0);
         roundedOptionsDialog("Einträge filtern",
@@ -101,6 +107,7 @@ public class MainActivity extends AppCompatActivity {
             new String[]{"Nach Datum und Uhrzeit absteigend sortieren","Nach Datum und Uhrzeit aufsteigend sortieren"},
             new String[]{"↓","↑"},
             new int[]{0xFFE4F2E9,0xFFEAF1FA},
+            selected,
             choice->{if(accountId>0)getPreferences(0).edit().putInt("entry_sort_"+accountId,choice==1?1:0).apply();refresh();});
     }
     void refresh(){
@@ -258,7 +265,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     interface MenuAction{void selected(int index);}
-    void roundedOptionsDialog(String title,String[] titles,String[] subtitles,String[] icons,int[] colors,MenuAction action){
+    void roundedOptionsDialog(String title,String[] titles,String[] subtitles,String[] icons,int[] colors,MenuAction action){roundedOptionsDialog(title,titles,subtitles,icons,colors,-1,action);}
+    void roundedOptionsDialog(String title,String[] titles,String[] subtitles,String[] icons,int[] colors,int checkedIndex,MenuAction action){
         LinearLayout panel=column();panel.setPadding(dp(16),dp(14),dp(16),dp(12));panel.setBackground(shape(BG,24));
         TextView heading=text(title,20,DARK,true);heading.setPadding(dp(6),dp(2),dp(6),dp(14));panel.addView(heading);
         AlertDialog dialog=new AlertDialog.Builder(this).setView(panel).create();
@@ -268,7 +276,7 @@ public class MainActivity extends AppCompatActivity {
             TextView symbol=text(icons[i],21,DARK,true);symbol.setGravity(Gravity.CENTER);symbol.setBackground(shape(colors[i],30));item.addView(symbol,lp(44,44));
             LinearLayout details=column();LinearLayout.LayoutParams detailParams=new LinearLayout.LayoutParams(0,-2,1);detailParams.leftMargin=dp(12);item.addView(details,detailParams);
             details.addView(text(titles[i],15,DARK,true));details.addView(text(subtitles[i],12,0xFF718078,false));
-            item.addView(text("›",25,0xFF718078,false));item.setOnClickListener(v->{dialog.dismiss();action.selected(selected);});
+            item.addView(text(selected==checkedIndex?"✓":"›",selected==checkedIndex?21:25,selected==checkedIndex?GREEN:0xFF718078,true));item.setOnClickListener(v->{dialog.dismiss();action.selected(selected);});
         }
         Button close=button("Schliessen",0xFF68756E);panel.addView(close,lp(-1,46));close.setOnClickListener(v->dialog.dismiss());
         dialog.show();
