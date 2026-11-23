@@ -75,8 +75,8 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout.LayoutParams ap=lp(0,68);ap.weight=1;ap.rightMargin=dp(6);actions.addView(plus,ap);LinearLayout.LayoutParams mp=lp(0,68);mp.weight=1;mp.leftMargin=dp(6);actions.addView(minus,mp);
         plus.setOnClickListener(v->entryDialog(true,null));minus.setOnClickListener(v->entryDialog(false,null));
         LinearLayout filters=row();filters.setPadding(dp(16),dp(4),dp(16),dp(8));root.addView(filters,lp(-1,62));
-        monthSpin=new Spinner(this);yearSpin=new Spinner(this);LinearLayout.LayoutParams fp=lp(0,48);fp.weight=1.45f;fp.rightMargin=dp(4);filters.addView(monthSpin,fp);LinearLayout.LayoutParams yp=lp(0,48);yp.weight=.8f;yp.leftMargin=dp(4);filters.addView(yearSpin,yp);
-        monthSpin.setDropDownWidth(getResources().getDisplayMetrics().widthPixels-dp(32));yearSpin.setDropDownWidth(dp(120));
+        monthSpin=new Spinner(this);yearSpin=new Spinner(this);LinearLayout.LayoutParams fp=lp(0,48);fp.weight=1f;fp.rightMargin=dp(4);filters.addView(monthSpin,fp);LinearLayout.LayoutParams yp=lp(112,48);yp.leftMargin=dp(4);filters.addView(yearSpin,yp);
+        monthSpin.setDropDownWidth(getResources().getDisplayMetrics().widthPixels-dp(32));yearSpin.setDropDownWidth(dp(144));
         FunnelIconView filterButton=new FunnelIconView();filterButton.setBackground(shape(0xFFFFFFFF,14));filterButton.setContentDescription("Sortierung filtern");LinearLayout.LayoutParams filterParams=lp(48,48);filterParams.leftMargin=dp(8);filters.addView(filterButton,filterParams);filterButton.setOnClickListener(v->showSortFilterDialog());
         setupFilters();
         ScrollView sc=new ScrollView(this);sc.setFillViewport(false);root.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
