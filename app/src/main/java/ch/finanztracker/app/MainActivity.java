@@ -303,7 +303,21 @@ public class MainActivity extends AppCompatActivity {
         Calendar cal=Calendar.getInstance();
         new DatePickerDialog(this,(view,yy,mm,dd)->{
             String date=String.format(Locale.GERMANY,"%02d.%02d.%04d",dd,mm+1,yy);int count=0;
-            try(Cursor c=db.fixedCosts(accountId)){while(c.moveToNext()){db.addEntry(accountId,c.getString(1),date,"00:00",c.getDouble(2),c.getInt(3)==1,"");count++;}}
+            ArrayList<String[]> fixed=new ArrayList<>();
+            try(Cursor c=db.fixedCosts(accountId)){
+                while(c.moveToNext())fixed.add(new String[]{c.getString(1),String.valueOf(c.getDouble(2)),String.valueOf(c.getInt(3))});
+            }
+            // Einträge werden in der Liste nach ID absteigend angezeigt.
+            // Deshalb zuerst Ausgaben, danach Einnahmen einfügen: Einnahmen stehen oben.
+            // Rückwärts einfügen erhält innerhalb beider Gruppen die bisherige Fixkosten-Reihenfolge.
+            for(int i=fixed.size()-1;i>=0;i--){
+                String[] item=fixed.get(i);
+                if("0".equals(item[2])){db.addEntry(accountId,item[0],date,"00:00",Double.parseDouble(item[1]),false,"");count++;}
+            }
+            for(int i=fixed.size()-1;i>=0;i--){
+                String[] item=fixed.get(i);
+                if("1".equals(item[2])){db.addEntry(accountId,item[0],date,"00:00",Double.parseDouble(item[1]),true,"");count++;}
+            }
             refresh();scheduleAutomaticBackup();toast(count+" Fixkosten für den "+date+" eingefügt.");
         },cal.get(Calendar.YEAR),cal.get(Calendar.MONTH),cal.get(Calendar.DAY_OF_MONTH)).show();
     }
