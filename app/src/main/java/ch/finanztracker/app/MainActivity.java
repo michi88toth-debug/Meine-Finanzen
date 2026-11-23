@@ -28,7 +28,7 @@ import java.util.*;
 
 public class MainActivity extends AppCompatActivity {
     static final int GREEN=0xFF198754, RED=0xFFDC3545, BLUE=0xFF2878C7, DARK=0xFF18352A, BG=0xFFF4F7F5;
-    DB db; LinearLayout root, list; Spinner accountSpin, monthSpin, yearSpin;
+    DB db; LinearLayout root, list; Spinner accountSpin, monthSpin, yearSpin, sortSpin;
     TextView expenses, incomes, balance; ArrayList<String> accounts=new ArrayList<>(); int accountId=-1;
     String[] months={"Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember","Ganzes Jahr"};
     int selectedMonth=Calendar.getInstance().get(Calendar.MONTH)+1, selectedYear=Calendar.getInstance().get(Calendar.YEAR);
@@ -77,6 +77,9 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout filters=row();filters.setPadding(dp(16),dp(4),dp(16),dp(8));root.addView(filters,lp(-1,62));
         monthSpin=new Spinner(this);yearSpin=new Spinner(this);LinearLayout.LayoutParams fp=lp(0,48);fp.weight=1;fp.rightMargin=dp(5);filters.addView(monthSpin,fp);LinearLayout.LayoutParams yp=lp(0,48);yp.weight=1;yp.leftMargin=dp(5);filters.addView(yearSpin,yp);
         setupFilters();
+        LinearLayout sortWrap=row();sortWrap.setPadding(dp(16),dp(0),dp(16),dp(6));root.addView(sortWrap,lp(-1,52));
+        TextView sortLabel=text("Sortierung",13,0xFF52645A,true);sortWrap.addView(sortLabel,lp(92,-2));
+        sortSpin=new Spinner(this);sortWrap.addView(sortSpin,new LinearLayout.LayoutParams(0,dp(44),1));setupSortFilter();
         ScrollView sc=new ScrollView(this);sc.setFillViewport(false);root.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
         list=column();list.setPadding(dp(16),dp(2),dp(16),dp(12));sc.addView(list);
         LinearLayout exportWrap=row();exportWrap.setPadding(dp(16),dp(4),dp(16),dp(8));root.addView(exportWrap,lp(-1,56));Button export=button("Export",0xFF356B9A),insertFixed=button("Fixkosten einfügen",GREEN);LinearLayout.LayoutParams ep=lp(0,48);ep.weight=1;ep.rightMargin=dp(5);exportWrap.addView(export,ep);LinearLayout.LayoutParams ip=lp(0,48);ip.weight=1;ip.leftMargin=dp(5);exportWrap.addView(insertFixed,ip);export.setOnClickListener(v->exportDialog());insertFixed.setOnClickListener(v->insertFixedCosts());
@@ -92,7 +95,20 @@ public class MainActivity extends AppCompatActivity {
         monthSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){selectedMonth=pos==12?0:pos+1;refresh();}});
         yearSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){selectedYear=Integer.parseInt(ys.get(pos));refresh();}});
     }
-    void reloadAccounts(){accounts=db.accounts();ArrayAdapter<String>a=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,accounts);accountSpin.setAdapter(a);String savedName=getPreferences(0).getString("last_account_name","");String wanted=savedName;if(accountId>0){String current=db.accountName(accountId);if(!current.isEmpty())wanted=current;}int initial=accounts.indexOf(wanted);if(initial<0)initial=0;accountSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){if(pos>=0&&pos<accounts.size()){String name=accounts.get(pos);accountId=db.accountId(name);getPreferences(0).edit().putString("last_account_name",name).apply();refresh();}}});if(!accounts.isEmpty())accountSpin.setSelection(initial);else accountId=-1;}
+    void reloadAccounts(){accounts=db.accounts();ArrayAdapter<String>a=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,accounts);accountSpin.setAdapter(a);String savedName=getPreferences(0).getString("last_account_name","");String wanted=savedName;if(accountId>0){String current=db.accountName(accountId);if(!current.isEmpty())wanted=current;}int initial=accounts.indexOf(wanted);if(initial<0)initial=0;accountSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){if(pos>=0&&pos<accounts.size()){String name=accounts.get(pos);accountId=db.accountId(name);getPreferences(0).edit().putString("last_account_name",name).apply();applySortSelection();refresh();}}});if(!accounts.isEmpty()){accountSpin.setSelection(initial);accountId=db.accountId(accounts.get(initial));applySortSelection();}else accountId=-1;}
+    void setupSortFilter(){
+        ArrayList<String> options=new ArrayList<>(Arrays.asList("Neueste zuerst (absteigend)","Älteste zuerst (aufsteigend)"));
+        sortSpin.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,options));
+        sortSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onNothingSelected(android.widget.AdapterView<?> p){}
+            public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){
+                if(accountId>0)getPreferences(0).edit().putInt("entry_sort_"+accountId,pos==1?1:0).apply();
+                refresh();
+            }
+        });
+        applySortSelection();
+    }
+    void applySortSelection(){if(sortSpin!=null&&accountId>0)sortSpin.setSelection(getPreferences(0).getInt("entry_sort_"+accountId,0));}
     void refresh(){
         if(list==null)return;list.removeAllViews();if(accountId<0&& !accounts.isEmpty())accountId=db.accountId(accounts.get(0));
         double inc=0,exp=0,transfer=0;
@@ -108,7 +124,7 @@ public class MainActivity extends AppCompatActivity {
             LinearLayout.LayoutParams transferTextParams=new LinearLayout.LayoutParams(0,-2,1);transferTextParams.leftMargin=dp(10);transferCard.addView(transferLabel,transferTextParams);
             transferCard.addView(text(money(transfer),15,BLUE,true));
         }
-        Cursor c=db.entries(accountId,selectedMonth,selectedYear);
+        Cursor c=db.entries(accountId,selectedMonth,selectedYear,getPreferences(0).getInt("entry_sort_"+accountId,0));
         if(c.getCount()==0&&selectedMonth==0){TextView empty=text("Noch keine Einträge in diesem Zeitraum.",14,0xFF77847D,false);empty.setGravity(Gravity.CENTER);empty.setPadding(0,dp(35),0,dp(35));list.addView(empty);}
         while(c.moveToNext()){
             int id=c.getInt(0);String purpose=c.getString(1),date=c.getString(2);double amount=c.getDouble(3);boolean income=c.getInt(4)==1;
@@ -536,7 +552,7 @@ public class MainActivity extends AppCompatActivity {
         void updateEntry(int id,String p,String date,String time,double amount,boolean income,String receipt){getWritableDatabase().execSQL("UPDATE entries SET purpose=?,date=?,amount=?,income=?,receipt_path=?,entry_time=? WHERE id=?",new Object[]{p,date,amount,income?1:0,receipt,time,id});}
         void deleteEntry(int id){getWritableDatabase().execSQL("DELETE FROM entries WHERE id=?",new Object[]{id});}
         Cursor one(int id){return getReadableDatabase().rawQuery("SELECT id,purpose,date,amount,income,receipt_path,entry_time FROM entries WHERE id=?",new String[]{""+id});}
-        Cursor entries(int aid,int month,int year){String sql="SELECT id,purpose,date,amount,income,receipt_path,entry_time FROM entries WHERE account_id=? AND substr(date,7,4)=?"+(month==0?"":" AND substr(date,4,2)=?")+" ORDER BY substr(date,7,4) DESC,substr(date,4,2) DESC,substr(date,1,2) DESC,entry_time DESC,id DESC";return month==0?getReadableDatabase().rawQuery(sql,new String[]{""+aid,""+year}):getReadableDatabase().rawQuery(sql,new String[]{""+aid,""+year,String.format(Locale.US,"%02d",month)});}
+        Cursor entries(int aid,int month,int year,int sortOrder){String direction=sortOrder==1?"ASC":"DESC";String sql="SELECT id,purpose,date,amount,income,receipt_path,entry_time FROM entries WHERE account_id=? AND substr(date,7,4)=?"+(month==0?"":" AND substr(date,4,2)=?")+" ORDER BY substr(date,7,4) "+direction+",substr(date,4,2) "+direction+",substr(date,1,2) "+direction+",entry_time "+direction+",id "+direction;return month==0?getReadableDatabase().rawQuery(sql,new String[]{""+aid,""+year}):getReadableDatabase().rawQuery(sql,new String[]{""+aid,""+year,String.format(Locale.US,"%02d",month)});}
         Cursor allEntries(){return getReadableDatabase().rawQuery("SELECT e.id,a.name,e.purpose,e.date,e.amount,e.income,e.receipt_path,e.entry_time FROM entries e JOIN accounts a ON a.id=e.account_id",null);}
     }
 }
