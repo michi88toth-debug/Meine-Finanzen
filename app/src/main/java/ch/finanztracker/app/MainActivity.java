@@ -113,7 +113,7 @@ public class MainActivity extends AppCompatActivity {
     void refresh(){
         if(list==null)return;list.removeAllViews();if(accountId<0&& !accounts.isEmpty())accountId=db.accountId(accounts.get(0));
         double inc=0,exp=0,transfer=0;
-        if(selectedMonth>0){
+        if(selectedMonth>0&&db.carryoverEnabled(accountId)){
             transfer=db.balanceBeforeMonth(accountId,selectedYear,selectedMonth);
             Calendar previous=Calendar.getInstance();previous.set(selectedYear,selectedMonth-2,1);
             String previousLabel=months[previous.get(Calendar.MONTH)];
@@ -222,7 +222,7 @@ public class MainActivity extends AppCompatActivity {
     void confirmEdit(int id,String p,String date,double amt,boolean income){
         new AlertDialog.Builder(this).setMessage("Willst du den Eintrag bearbeiten?").setNegativeButton("Nein",null).setPositiveButton("Ja",(d,w)->new AlertDialog.Builder(this).setTitle("Eintrag bearbeiten").setItems(new String[]{"Bearbeiten","Löschen","Abbrechen"},(x,which)->{if(which==0)entryDialog(income,new int[]{id});else if(which==1)new AlertDialog.Builder(this).setMessage("Eintrag wirklich löschen?").setNegativeButton("Nein",null).setPositiveButton("Löschen",(a,b)->{db.deleteEntry(id);refresh();}).show();}).show()).show();
     }
-    void exportDialog(){new AlertDialog.Builder(this).setTitle("Exportformat wählen").setItems(new String[]{"PDF (A4)","Excel (CSV)"},(d,w)->{exportRows.clear();if(selectedMonth>0){double transfer=db.balanceBeforeMonth(accountId,selectedYear,selectedMonth);Calendar previous=Calendar.getInstance();previous.set(selectedYear,selectedMonth-2,1);String label=months[previous.get(Calendar.MONTH)];if(selectedMonth==1)label+=" "+previous.get(Calendar.YEAR);exportRows.add(new String[]{"Übertrag Saldo ("+label+")","",String.format(Locale.US,"%.2f",transfer),"Übertrag"});}Cursor c=db.entries(accountId,selectedMonth,selectedYear,0);while(c.moveToNext())exportRows.add(new String[]{(c.getString(1)==null||c.getString(1).trim().isEmpty())?"Ohne Zweck":c.getString(1),c.getString(2)+" "+(c.getString(6)==null?"00:00":c.getString(6)),String.format(Locale.US,"%.2f",c.getDouble(3)),c.getInt(4)==1?"Einnahme":"Ausgabe"});c.close();Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType(w==0?"application/pdf":"text/csv");i.putExtra(Intent.EXTRA_TITLE,w==0?"Meine-Finanzen.pdf":"Meine-Finanzen.csv");startActivityForResult(i,w==0?REQ_PDF:REQ_CSV);}).show();}
+    void exportDialog(){new AlertDialog.Builder(this).setTitle("Exportformat wählen").setItems(new String[]{"PDF (A4)","Excel (CSV)"},(d,w)->{exportRows.clear();if(selectedMonth>0&&db.carryoverEnabled(accountId)){double transfer=db.balanceBeforeMonth(accountId,selectedYear,selectedMonth);Calendar previous=Calendar.getInstance();previous.set(selectedYear,selectedMonth-2,1);String label=months[previous.get(Calendar.MONTH)];if(selectedMonth==1)label+=" "+previous.get(Calendar.YEAR);exportRows.add(new String[]{"Übertrag Saldo ("+label+")","",String.format(Locale.US,"%.2f",transfer),"Übertrag"});}Cursor c=db.entries(accountId,selectedMonth,selectedYear,0);while(c.moveToNext())exportRows.add(new String[]{(c.getString(1)==null||c.getString(1).trim().isEmpty())?"Ohne Zweck":c.getString(1),c.getString(2)+" "+(c.getString(6)==null?"00:00":c.getString(6)),String.format(Locale.US,"%.2f",c.getDouble(3)),c.getInt(4)==1?"Einnahme":"Ausgabe"});c.close();Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType(w==0?"application/pdf":"text/csv");i.putExtra(Intent.EXTRA_TITLE,w==0?"Meine-Finanzen.pdf":"Meine-Finanzen.csv");startActivityForResult(i,w==0?REQ_PDF:REQ_CSV);}).show();}
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
         if(request==REQ_RECEIPT_CAMERA){if(result==RESULT_OK&&!pendingReceiptCapturePath.isEmpty()){File f=new File(pendingReceiptCapturePath);if(f.exists()&&f.length()>0){try{compressReceipt(f);activeReceiptPath=pendingReceiptCapturePath;if(receiptAddButton!=null)receiptAddButton.setText("🧾  Quittung hinzugefügt");toast("Quittung aufgenommen.");}catch(Exception ex){showErrorDialog("Quittung konnte nicht verarbeitet werden",ex.toString());}}else toast("Kein Quittungsfoto erhalten.");}else toast("Fotoaufnahme abgebrochen.");pendingReceiptCapturePath="";return;}
@@ -341,13 +341,35 @@ public class MainActivity extends AppCompatActivity {
     }
     void accountsDialog(){
         roundedOptionsDialog("Konten verwalten",
-            new String[]{"Konto hinzufügen","Konto umbenennen","Konto löschen"},
-            new String[]{"Ein weiteres Konto erstellen","Name des ausgewählten Kontos ändern","Konto samt Einträgen und Fixkosten entfernen"},
-            new String[]{"+","✎","−"},new int[]{0xFFE4F2E9,0xFFEAF1FA,0xFFFFE8E8},w->{
+            new String[]{"Konto hinzufügen","Konto umbenennen","Konto löschen","Übertrag Saldo"},
+            new String[]{"Ein weiteres Konto erstellen","Name des ausgewählten Kontos ändern","Konto samt Einträgen und Fixkosten entfernen","Einstellung für den ausgewählten Kontoübertrag"},
+            new String[]{"+","✎","−","↗"},new int[]{0xFFE4F2E9,0xFFEAF1FA,0xFFFFE8E8,0xFFEAF1FA},w->{
                 if(w==0)askText("Neues Konto",name->{db.addAccount(name);getPreferences(0).edit().putString("last_account_name",name).apply();accountId=-1;reloadAccounts();refresh();});
                 else if(w==1)askText("Neuer Kontoname",name->{db.renameAccount(accountId,name);getPreferences(0).edit().putString("last_account_name",name).apply();reloadAccounts();refresh();});
-                else new AlertDialog.Builder(this).setMessage("Konto und alle zugehörigen Einträge sowie Fixkosten löschen?").setNegativeButton("Abbrechen",null).setPositiveButton("Löschen",(a,b)->{db.deleteAccount(accountId);ensureAccount();accountId=-1;reloadAccounts();refresh();scheduleAutomaticBackup();}).show();
+                else if(w==2)new AlertDialog.Builder(this).setMessage("Konto und alle zugehörigen Einträge sowie Fixkosten löschen?").setNegativeButton("Abbrechen",null).setPositiveButton("Löschen",(a,b)->{db.deleteAccount(accountId);ensureAccount();accountId=-1;reloadAccounts();refresh();scheduleAutomaticBackup();}).show();
+                else saldoTransferDialog();
             });
+    }
+    void saldoTransferDialog(){
+        boolean enabled=db.carryoverEnabled(accountId);
+        LinearLayout panel=column();panel.setPadding(dp(16),dp(14),dp(16),dp(12));panel.setBackground(shape(BG,24));
+        TextView heading=text("Übertrag Saldo",20,DARK,true);heading.setPadding(dp(6),dp(2),dp(6),dp(8));panel.addView(heading);
+        TextView explanation=text("Wähle ob der Saldo jeweils auf den Folgemonat übertragen wird.",14,0xFF718078,false);explanation.setPadding(dp(6),0,dp(6),dp(14));panel.addView(explanation);
+        AlertDialog dialog=new AlertDialog.Builder(this).setView(panel).create();
+        String[] titles={"Saldo übertragen","Saldo nicht übertragen"};
+        String[] subtitles={"Der bisherige Saldo wird in den Folgemonat übernommen.","Jeder Monat beginnt mit CHF 0.00."};
+        String[] icons={"↗","○"};int[] colors={0xFFE4F2E9,0xFFEAF1FA};
+        for(int i=0;i<titles.length;i++){
+            final boolean choice=i==0;LinearLayout item=row();item.setBackground(shape(0xFFFFFFFF,18));item.setPadding(dp(12),dp(11),dp(12),dp(11));
+            LinearLayout.LayoutParams itemParams=lp(-1,-2);itemParams.bottomMargin=dp(9);panel.addView(item,itemParams);
+            TextView symbol=text(icons[i],21,DARK,true);symbol.setGravity(Gravity.CENTER);symbol.setBackground(shape(colors[i],30));item.addView(symbol,lp(44,44));
+            LinearLayout details=column();LinearLayout.LayoutParams detailParams=new LinearLayout.LayoutParams(0,-2,1);detailParams.leftMargin=dp(12);item.addView(details,detailParams);
+            details.addView(text(titles[i],15,DARK,true));details.addView(text(subtitles[i],12,0xFF718078,false));
+            boolean selected=enabled==choice;item.addView(text(selected?"✓":"›",selected?21:25,selected?GREEN:0xFF718078,true));
+            item.setOnClickListener(v->{dialog.dismiss();db.setCarryoverEnabled(accountId,choice);refresh();scheduleAutomaticBackup();});
+        }
+        Button close=button("Schliessen",0xFF68756E);panel.addView(close,lp(-1,46));close.setOnClickListener(v->dialog.dismiss());
+        dialog.show();
     }
     interface TextDone{void done(String s);}
     void askText(String title,TextDone done){
@@ -511,27 +533,30 @@ public class MainActivity extends AppCompatActivity {
     String backupJson()throws Exception{
         org.json.JSONArray aa=new org.json.JSONArray(),ee=new org.json.JSONArray(),ff=new org.json.JSONArray();
         for(String a:db.accounts())aa.put(a);
+        org.json.JSONObject carryoverSettings=new org.json.JSONObject();for(String account:db.accounts())carryoverSettings.put(account,db.carryoverEnabled(db.accountId(account)));
         Cursor c=db.allEntries();
         while(c.moveToNext()){
             org.json.JSONObject o=new org.json.JSONObject();o.put("account",c.getString(1));o.put("purpose",c.getString(2));o.put("date",c.getString(3));o.put("time",c.getString(7)==null?"00:00":c.getString(7));o.put("amount",c.getDouble(4));o.put("income",c.getInt(5)==1);String receiptPath=c.getString(6);if(receiptPath!=null&&!receiptPath.isEmpty()&&new File(receiptPath).exists()){File receiptFile=new File(receiptPath);o.put("receipt_file",android.util.Base64.encodeToString(readFileBytes(receiptPath),android.util.Base64.NO_WRAP));o.put("receipt_name",receiptFile.getName());}ee.put(o);
         }
-        c.close();Cursor fc=db.allFixedCosts();while(fc.moveToNext()){org.json.JSONObject o=new org.json.JSONObject();o.put("account",db.accountName(fc.getInt(4)));o.put("purpose",fc.getString(1));o.put("amount",fc.getDouble(2));o.put("income",fc.getInt(3)==1);ff.put(o);}fc.close();org.json.JSONObject root=new org.json.JSONObject();root.put("accounts",aa);root.put("entries",ee);root.put("fixed_costs",ff);root.put("backup_version",2);root.put("created_at",System.currentTimeMillis());return root.toString(2);
+        c.close();Cursor fc=db.allFixedCosts();while(fc.moveToNext()){org.json.JSONObject o=new org.json.JSONObject();o.put("account",db.accountName(fc.getInt(4)));o.put("purpose",fc.getString(1));o.put("amount",fc.getDouble(2));o.put("income",fc.getInt(3)==1);ff.put(o);}fc.close();org.json.JSONObject root=new org.json.JSONObject();root.put("accounts",aa);root.put("entries",ee);root.put("fixed_costs",ff);root.put("account_carryover",carryoverSettings);root.put("backup_version",3);root.put("created_at",System.currentTimeMillis());return root.toString(2);
     }
     void writeBackup(Uri uri)throws Exception{
         try(Writer w=new OutputStreamWriter(getContentResolver().openOutputStream(uri),"UTF-8")){w.write(backupJson());}
         toast("Backup gespeichert.");
     }
     void readBackup(Uri uri)throws Exception{StringBuilder s=new StringBuilder();try(BufferedReader r=new BufferedReader(new InputStreamReader(getContentResolver().openInputStream(uri),"UTF-8"))){String line;while((line=r.readLine())!=null)s.append(line);}restoreBackupJson(s.toString());}
-    void restoreBackupJson(String json)throws Exception{org.json.JSONObject j=new org.json.JSONObject(json);org.json.JSONArray aa=j.getJSONArray("accounts"),ee=j.getJSONArray("entries"),ff=j.optJSONArray("fixed_costs");db.clearAll();db.clearFixedCosts();for(int i=0;i<aa.length();i++)db.addAccount(aa.getString(i));for(int i=0;i<ee.length();i++){org.json.JSONObject o=ee.getJSONObject(i);int aid=db.accountId(o.getString("account"));if(aid>0){String receiptPath="";String fileData=o.optString("receipt_file","");if(!fileData.isEmpty())receiptPath=restoreReceiptFile(fileData,o.optString("receipt_name","Quittung"));else{String image=o.optString("receipt_image","");if(!image.isEmpty())receiptPath=restoreReceiptImage(image);}db.addEntry(aid,o.optString("purpose",""),o.getString("date"),o.optString("time","00:00"),o.getDouble("amount"),o.getBoolean("income"),receiptPath);}}if(ff!=null)for(int i=0;i<ff.length();i++){org.json.JSONObject o=ff.getJSONObject(i);String account=o.optString("account",aa.length()>0?aa.getString(0):"");int fixedAccountId=db.accountId(account);if(fixedAccountId>0)db.addFixedCost(fixedAccountId,o.optString("purpose",""),o.getDouble("amount"),o.optBoolean("income",false));}ensureAccount();accountId=-1;reloadAccounts();refresh();scheduleAutomaticBackup();toast("Backup wiederhergestellt.");}
+    void restoreBackupJson(String json)throws Exception{org.json.JSONObject j=new org.json.JSONObject(json);org.json.JSONArray aa=j.getJSONArray("accounts"),ee=j.getJSONArray("entries"),ff=j.optJSONArray("fixed_costs");db.clearAll();db.clearFixedCosts();org.json.JSONObject carryover=j.optJSONObject("account_carryover");for(int i=0;i<aa.length();i++){String accountName=aa.getString(i);db.addAccount(accountName);if(carryover!=null&&carryover.has(accountName))db.setCarryoverEnabled(db.accountId(accountName),carryover.optBoolean(accountName,true));}for(int i=0;i<ee.length();i++){org.json.JSONObject o=ee.getJSONObject(i);int aid=db.accountId(o.getString("account"));if(aid>0){String receiptPath="";String fileData=o.optString("receipt_file","");if(!fileData.isEmpty())receiptPath=restoreReceiptFile(fileData,o.optString("receipt_name","Quittung"));else{String image=o.optString("receipt_image","");if(!image.isEmpty())receiptPath=restoreReceiptImage(image);}db.addEntry(aid,o.optString("purpose",""),o.getString("date"),o.optString("time","00:00"),o.getDouble("amount"),o.getBoolean("income"),receiptPath);}}if(ff!=null)for(int i=0;i<ff.length();i++){org.json.JSONObject o=ff.getJSONObject(i);String account=o.optString("account",aa.length()>0?aa.getString(0):"");int fixedAccountId=db.accountId(account);if(fixedAccountId>0)db.addFixedCost(fixedAccountId,o.optString("purpose",""),o.getDouble("amount"),o.optBoolean("income",false));}ensureAccount();accountId=-1;reloadAccounts();refresh();scheduleAutomaticBackup();toast("Backup wiederhergestellt.");}
     void showErrorDialog(String title,String detail){TextView message=text(detail,14,DARK,false);message.setTextIsSelectable(true);message.setPadding(dp(16),dp(12),dp(16),dp(12));ScrollView scroll=new ScrollView(this);scroll.addView(message);new AlertDialog.Builder(this).setTitle(title).setView(scroll).setNeutralButton("Fehler kopieren",(d,w)->{android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);clipboard.setPrimaryClip(ClipData.newPlainText("Fehlermeldung",detail));toast("Fehlermeldung kopiert.");}).setPositiveButton("Schliessen",null).show();}
     void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
 
     static class DB extends SQLiteOpenHelper{
-        DB(Context c){super(c,"finanzen.db",null,5);}
-        public void onCreate(SQLiteDatabase d){d.execSQL("CREATE TABLE accounts(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE)");d.execSQL("CREATE TABLE entries(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER,purpose TEXT,date TEXT,amount REAL,income INTEGER,receipt_path TEXT,entry_time TEXT DEFAULT '00:00')");d.execSQL("CREATE TABLE fixed_costs(id INTEGER PRIMARY KEY AUTOINCREMENT,purpose TEXT,amount REAL,income INTEGER,account_id INTEGER)");}
-        public void onUpgrade(SQLiteDatabase d,int a,int b){if(a<2)d.execSQL("ALTER TABLE entries ADD COLUMN receipt_path TEXT");if(a<3)d.execSQL("ALTER TABLE entries ADD COLUMN entry_time TEXT DEFAULT '00:00'");if(a<4)d.execSQL("CREATE TABLE fixed_costs(id INTEGER PRIMARY KEY AUTOINCREMENT,purpose TEXT,amount REAL,income INTEGER)");if(a<5){d.execSQL("ALTER TABLE fixed_costs ADD COLUMN account_id INTEGER");d.execSQL("UPDATE fixed_costs SET account_id=(SELECT id FROM accounts ORDER BY id LIMIT 1) WHERE account_id IS NULL");}}
+        DB(Context c){super(c,"finanzen.db",null,6);}
+        public void onCreate(SQLiteDatabase d){d.execSQL("CREATE TABLE accounts(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE,carryover_enabled INTEGER NOT NULL DEFAULT 1)");d.execSQL("CREATE TABLE entries(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER,purpose TEXT,date TEXT,amount REAL,income INTEGER,receipt_path TEXT,entry_time TEXT DEFAULT '00:00')");d.execSQL("CREATE TABLE fixed_costs(id INTEGER PRIMARY KEY AUTOINCREMENT,purpose TEXT,amount REAL,income INTEGER,account_id INTEGER)");}
+        public void onUpgrade(SQLiteDatabase d,int a,int b){if(a<2)d.execSQL("ALTER TABLE entries ADD COLUMN receipt_path TEXT");if(a<3)d.execSQL("ALTER TABLE entries ADD COLUMN entry_time TEXT DEFAULT '00:00'");if(a<4)d.execSQL("CREATE TABLE fixed_costs(id INTEGER PRIMARY KEY AUTOINCREMENT,purpose TEXT,amount REAL,income INTEGER)");if(a<5){d.execSQL("ALTER TABLE fixed_costs ADD COLUMN account_id INTEGER");d.execSQL("UPDATE fixed_costs SET account_id=(SELECT id FROM accounts ORDER BY id LIMIT 1) WHERE account_id IS NULL");}if(a<6)d.execSQL("ALTER TABLE accounts ADD COLUMN carryover_enabled INTEGER NOT NULL DEFAULT 1");}
         void addAccount(String n){getWritableDatabase().execSQL("INSERT OR IGNORE INTO accounts(name) VALUES(?)",new Object[]{n});}
         void renameAccount(int id,String n){getWritableDatabase().execSQL("UPDATE accounts SET name=? WHERE id=?",new Object[]{n,id});}
+        boolean carryoverEnabled(int id){try(Cursor c=getReadableDatabase().rawQuery("SELECT carryover_enabled FROM accounts WHERE id=?",new String[]{String.valueOf(id)})){return !c.moveToFirst()||c.getInt(0)==1;}}
+        void setCarryoverEnabled(int id,boolean enabled){getWritableDatabase().execSQL("UPDATE accounts SET carryover_enabled=? WHERE id=?",new Object[]{enabled?1:0,id});}
         void deleteAccount(int id){getWritableDatabase().execSQL("DELETE FROM entries WHERE account_id=?",new Object[]{id});getWritableDatabase().execSQL("DELETE FROM fixed_costs WHERE account_id=?",new Object[]{id});getWritableDatabase().execSQL("DELETE FROM accounts WHERE id=?",new Object[]{id});}
         void clearAll(){getWritableDatabase().execSQL("DELETE FROM entries");getWritableDatabase().execSQL("DELETE FROM accounts");}
         void clearFixedCosts(){getWritableDatabase().execSQL("DELETE FROM fixed_costs");}
