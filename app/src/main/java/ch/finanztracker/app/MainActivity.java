@@ -67,8 +67,7 @@ public class MainActivity extends AppCompatActivity {
         root=column();root.setBackgroundColor(BG);setContentView(root);
         LinearLayout header=row();header.setBackgroundColor(GREEN);header.setPadding(dp(12),dp(8),dp(16),dp(8));root.addView(header,lp(-1,60));
         Button menu=button("☰",0xFF126B43);header.addView(menu,lp(48,44));menu.setOnClickListener(v->menu());
-        TextView title=text("Meine Finanzen",21,0xFFFFFFFF,true);LinearLayout.LayoutParams tp=lp(0,-2);tp.weight=1;tp.leftMargin=dp(12);header.addView(title,tp);
-        TextView coin=text("🪙",29,0xFFFFFFFF,true);header.addView(coin);
+        TextView title=text("BudgetPro",21,0xFFFFFFFF,true);LinearLayout.LayoutParams tp=lp(0,-2);tp.weight=1;tp.leftMargin=dp(12);header.addView(title,tp);
         accountSpin=new Spinner(this);LinearLayout accountBox=column();accountBox.setPadding(dp(16),dp(8),dp(16),dp(4));accountBox.addView(text("Konto auswählen",12,0xFF52645A,true));accountBox.addView(accountSpin,lp(-1,48));root.addView(accountBox);
         LinearLayout actions=row();actions.setPadding(dp(16),dp(6),dp(16),dp(8));root.addView(actions,lp(-1,86));
         Button plus=button("+",GREEN),minus=button("−",RED);plus.setTextSize(30);minus.setTextSize(30);plus.setContentDescription("Einnahme hinzufügen");minus.setContentDescription("Ausgabe hinzufügen");
